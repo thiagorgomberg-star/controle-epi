@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS sync_log (
     mensagem TEXT
 );
 
+-- Campos tamanho/estoque_atual/estoque_minimo aqui embaixo são LEGADOS: o app
+-- não lê nem grava mais neles (ver tabela epi_tamanhos, logo abaixo). Ficam na
+-- tabela só para não apagar histórico de instalações antigas; nunca são
+-- alterados por uma migração automática, então nenhum dado real é perdido.
 CREATE TABLE IF NOT EXISTS epis (
     id SERIAL PRIMARY KEY,
     nome TEXT NOT NULL,
@@ -61,19 +65,46 @@ CREATE TABLE IF NOT EXISTS epis (
     criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
 );
 
+-- Variantes de tamanho de um EPI, cada uma com seu próprio saldo de estoque
+-- (ex.: Botina nº 40 / nº 42, cada tamanho com quantidade e mínimo próprios).
+-- Um EPI sem variação real de tamanho ganha uma única variante "Único".
+CREATE TABLE IF NOT EXISTS epi_tamanhos (
+    id SERIAL PRIMARY KEY,
+    epi_id INTEGER NOT NULL REFERENCES epis(id),
+    tamanho TEXT NOT NULL,
+    estoque_atual INTEGER NOT NULL DEFAULT 0,
+    estoque_minimo INTEGER NOT NULL DEFAULT 0,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_epi_tamanhos_unico ON epi_tamanhos(epi_id, tamanho);
+CREATE INDEX IF NOT EXISTS idx_epi_tamanhos_epi ON epi_tamanhos(epi_id);
+
+-- Migração idempotente: todo EPI cadastrado antes desta versão ganha uma
+-- variante de tamanho única, herdando o tamanho/saldo que já tinha. Só insere
+-- para EPIs que ainda não têm nenhuma variante, então roda sem duplicar nada
+-- toda vez que o app sobe.
+INSERT INTO epi_tamanhos (epi_id, tamanho, estoque_atual, estoque_minimo)
+SELECT epis.id, COALESCE(NULLIF(TRIM(epis.tamanho), ''), 'Único'), epis.estoque_atual, epis.estoque_minimo
+FROM epis
+WHERE NOT EXISTS (SELECT 1 FROM epi_tamanhos et WHERE et.epi_id = epis.id);
+
 CREATE TABLE IF NOT EXISTS estoque_movimentacoes (
     id SERIAL PRIMARY KEY,
     epi_id INTEGER NOT NULL REFERENCES epis(id),
+    epi_tamanho_id INTEGER REFERENCES epi_tamanhos(id),
     tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'saida', 'ajuste')),
     quantidade INTEGER NOT NULL,
     motivo TEXT,
     usuario_id INTEGER REFERENCES usuarios(id),
     criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
 );
+ALTER TABLE estoque_movimentacoes ADD COLUMN IF NOT EXISTS epi_tamanho_id INTEGER REFERENCES epi_tamanhos(id);
 
 CREATE TABLE IF NOT EXISTS entregas (
     id SERIAL PRIMARY KEY,
     epi_id INTEGER NOT NULL REFERENCES epis(id),
+    epi_tamanho_id INTEGER REFERENCES epi_tamanhos(id),
     colaborador_id INTEGER NOT NULL REFERENCES usuarios(id),
     direcionado_por INTEGER NOT NULL REFERENCES usuarios(id),
     quantidade INTEGER NOT NULL DEFAULT 1,
@@ -87,6 +118,24 @@ CREATE TABLE IF NOT EXISTS entregas (
     status TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente', 'aceito', 'recusado')),
     criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
 );
+ALTER TABLE entregas ADD COLUMN IF NOT EXISTS epi_tamanho_id INTEGER REFERENCES epi_tamanhos(id);
+
+-- Backfill idempotente: neste momento cada EPI antigo tem exatamente uma
+-- variante (criada acima), então o vínculo é 1-para-1 e seguro. Uma vez
+-- preenchido, uma linha nunca é tocada de novo (WHERE epi_tamanho_id IS NULL),
+-- então adicionar um 2º tamanho no futuro não bagunça o histórico já ligado.
+UPDATE estoque_movimentacoes m
+SET epi_tamanho_id = et.id
+FROM epi_tamanhos et
+WHERE m.epi_tamanho_id IS NULL AND et.epi_id = m.epi_id;
+
+UPDATE entregas en
+SET epi_tamanho_id = et.id
+FROM epi_tamanhos et
+WHERE en.epi_tamanho_id IS NULL AND et.epi_id = en.epi_id;
+
+CREATE INDEX IF NOT EXISTS idx_movimentacoes_epi_tamanho ON estoque_movimentacoes(epi_tamanho_id);
+CREATE INDEX IF NOT EXISTS idx_entregas_epi_tamanho ON entregas(epi_tamanho_id);
 
 CREATE TABLE IF NOT EXISTS aceites (
     id SERIAL PRIMARY KEY,
