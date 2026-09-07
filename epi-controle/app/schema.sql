@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS sync_log (
 
 -- Campos tamanho/estoque_atual/estoque_minimo aqui embaixo são LEGADOS: o app
 -- não lê nem grava mais neles (ver tabela epi_tamanhos, logo abaixo). Ficam na
--- tabela só para não apagar histórico de instalações antigas; nunca são
+-- tabela só para não apagar histórico de instalações antigas — nunca são
 -- alterados por uma migração automática, então nenhum dado real é perdido.
 CREATE TABLE IF NOT EXISTS epis (
     id SERIAL PRIMARY KEY,
