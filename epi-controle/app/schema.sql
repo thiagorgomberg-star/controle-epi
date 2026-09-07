@@ -158,3 +158,34 @@ CREATE TABLE IF NOT EXISTS configuracoes (
 CREATE INDEX IF NOT EXISTS idx_entregas_colaborador ON entregas(colaborador_id);
 CREATE INDEX IF NOT EXISTS idx_entregas_status ON entregas(status);
 CREATE INDEX IF NOT EXISTS idx_movimentacoes_epi ON estoque_movimentacoes(epi_id);
+
+-- Ajusta o fluxo de status da entrega para refletir separação/compra no
+-- almoxarifado antes da retirada, em vez de pular direto para "aguardando
+-- aceite". Dados antigos com status 'pendente' viram 'pronto_retirada'
+-- automaticamente — antes, esse status já significava exatamente isso:
+-- aguardando o colaborador retirar e assinar.
+ALTER TABLE entregas DROP CONSTRAINT IF EXISTS entregas_status_check;
+UPDATE entregas SET status = 'pronto_retirada' WHERE status = 'pendente';
+ALTER TABLE entregas ADD CONSTRAINT entregas_status_check
+  CHECK (status IN ('em_separacao', 'em_compra', 'pronto_retirada', 'aceito', 'recusado'));
+ALTER TABLE entregas ALTER COLUMN status SET DEFAULT 'em_separacao';
+
+-- Solicitações de troca/reposição feitas pelo colaborador. Depois de
+-- aprovadas pelo gestor SESMT (admin), viram uma entrega normal (mesma
+-- tabela entregas), que passa pelo mesmo fluxo de separação/compra/retirada.
+CREATE TABLE IF NOT EXISTS solicitacoes (
+    id SERIAL PRIMARY KEY,
+    colaborador_id INTEGER NOT NULL REFERENCES usuarios(id),
+    epi_tamanho_id INTEGER NOT NULL REFERENCES epi_tamanhos(id),
+    tipo TEXT NOT NULL CHECK (tipo IN ('troca', 'reposicao')),
+    quantidade INTEGER NOT NULL DEFAULT 1,
+    motivo TEXT,
+    status TEXT NOT NULL DEFAULT 'pendente_aprovacao' CHECK (status IN ('pendente_aprovacao', 'aprovada', 'recusada', 'cancelada')),
+    aprovado_por INTEGER REFERENCES usuarios(id),
+    aprovado_em TEXT,
+    observacoes_aprovacao TEXT,
+    entrega_id INTEGER REFERENCES entregas(id),
+    criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_solicitacoes_colaborador ON solicitacoes(colaborador_id);
+CREATE INDEX IF NOT EXISTS idx_solicitacoes_status ON solicitacoes(status);
