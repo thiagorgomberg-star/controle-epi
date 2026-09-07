@@ -78,11 +78,17 @@
                 </form>
               </td>
               <td>
-                <form method="post" action="{{ url_for('colaboradores.alternar_status', usuario_id=c.id) }}" style="display:inline">
-                  <button class="botao secundario pequeno" type="submit">
-                    {% if c.ativo %}<span class="selo verde">Ativo</span>{% else %}<span class="selo cinza">Inativo</span>{% endif %}
-                  </button>
-                </form>
+                {% if current_user and c.id == current_user.id %}
+                  <span class="selo verde" title="Não é possível desativar o próprio acesso">Ativo (você)</span>
+                {% else %}
+                  <form method="post" action="{{ url_for('colaboradores.alternar_status', usuario_id=c.id) }}"
+                        style="display:inline"
+                        onsubmit="return confirm('{{ 'Desativar' if c.ativo else 'Reativar' }} o acesso de {{ c.nome }}?');">
+                    <button class="botao secundario pequeno" type="submit">
+                      {% if c.ativo %}<span class="selo verde">Ativo</span>{% else %}<span class="selo cinza">Inativo</span>{% endif %}
+                    </button>
+                  </form>
+                {% endif %}
               </td>
             </tr>
           {% endfor %}
