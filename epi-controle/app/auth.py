@@ -82,6 +82,9 @@ def login():
 @bp.route("/cadastro", methods=("GET", "POST"))
 def cadastro():
     total_usuarios = query_db("SELECT COUNT(*) AS c FROM usuarios", one=True)["c"]
+    admin_ativo_existe = query_db(
+        "SELECT COUNT(*) AS c FROM usuarios WHERE papel = 'admin' AND ativo = 1", one=True
+    )["c"] > 0
 
     if request.method == "POST":
         nome = request.form.get("nome", "").strip()
@@ -92,6 +95,13 @@ def cadastro():
         senha = request.form.get("senha", "")
         senha_confirma = request.form.get("senha_confirma", "")
 
+        existente = query_db("SELECT * FROM usuarios WHERE email = ?", (email,), one=True)
+        # Se não existe nenhum administrador ativo no sistema (por exemplo, o
+        # único admin ficou com o acesso desativado por engano), permitimos que
+        # o dono desse e-mail recupere o acesso recadastrando a senha aqui,
+        # em vez de bloquear com "e-mail já cadastrado".
+        recuperacao = existente is not None and not admin_ativo_existe
+
         erro = None
         if not nome:
             erro = "Informe o nome completo."
@@ -101,21 +111,35 @@ def cadastro():
             erro = "A senha precisa ter pelo menos 6 caracteres."
         elif senha != senha_confirma:
             erro = "As senhas não coincidem."
-        elif query_db("SELECT id FROM usuarios WHERE email = ?", (email,), one=True):
+        elif existente and not recuperacao:
             erro = "Já existe um acesso com este e-mail."
 
         if erro is None:
-            papel = "admin" if total_usuarios == 0 else "colaborador"
-            user_id = execute_db(
-                """INSERT INTO usuarios (nome, email, senha_hash, matricula, cargo, setor, papel)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (nome, email, generate_password_hash(senha), matricula, cargo, setor, papel),
-            )
+            if recuperacao:
+                execute_db(
+                    """UPDATE usuarios SET senha_hash = ?, nome = ?, cargo = ?, setor = ?,
+                                            papel = 'admin', ativo = 1
+                       WHERE id = ?""",
+                    (generate_password_hash(senha), nome, cargo, setor, existente["id"]),
+                )
+                user_id = existente["id"]
+                flash(
+                    "Acesso recuperado com sucesso. Como não havia administrador ativo no "
+                    "sistema, esta conta voltou a ser a administradora do SESMT.",
+                    "sucesso",
+                )
+            else:
+                papel = "admin" if total_usuarios == 0 else "colaborador"
+                user_id = execute_db(
+                    """INSERT INTO usuarios (nome, email, senha_hash, matricula, cargo, setor, papel)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (nome, email, generate_password_hash(senha), matricula, cargo, setor, papel),
+                )
+                if papel == "admin":
+                    flash("Conta criada com sucesso! Como primeiro acesso, você é o administrador do SESMT.", "sucesso")
             session.clear()
             session["user_id"] = user_id
             session.permanent = True
-            if papel == "admin":
-                flash("Conta criada com sucesso! Como primeiro acesso, você é o administrador do SESMT.", "sucesso")
             return redirect(url_for("painel.index_redirect"))
 
         flash(erro, "erro")
