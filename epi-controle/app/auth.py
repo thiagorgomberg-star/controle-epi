@@ -2,7 +2,7 @@ import functools
 import re
 
 from flask import (
-    Blueprint, flash, g, redirect, render_template, request, session, url_for
+    Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -72,6 +72,14 @@ def login():
             session.clear()
             session["user_id"] = user["id"]
             session.permanent = True
+
+            # Importação local para evitar import circular (ca_sync importa
+            # roles_required deste módulo). Dispara, no máximo 1x por semana
+            # civil, a sincronização automática da base de CA em segundo
+            # plano — não atrasa este login.
+            from .ca_sync import verificar_e_disparar_sincronizacao_semanal
+            verificar_e_disparar_sincronizacao_semanal(current_app._get_current_object())
+
             return redirect(url_for("painel.index_redirect"))
 
         flash(erro, "erro")
