@@ -10,7 +10,7 @@
 <body>
   {% if current_user %}
   <header class="topbar">
-    <div class="marca">Controle de EPI</div>
+    <a class="marca" href="{{ url_for('painel.index_redirect') }}">Controle de EPI</a>
     <nav>
       {% if current_user.papel in ('admin', 'almoxarife') %}
         <a href="{{ url_for('painel.admin_dashboard') }}" class="{{ 'ativo' if request.endpoint == 'painel.admin_dashboard' }}">Painel SESMT</a>
