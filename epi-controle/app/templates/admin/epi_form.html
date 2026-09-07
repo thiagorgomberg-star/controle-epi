@@ -69,15 +69,10 @@
             </div>
             <div>
               {% if t.ativo %}
-                <form method="post" action="{{ url_for('epis.tamanho_remover', epi_id=epi.id, tamanho_id=t.id) }}"
-                      data-confirmar="Remover o tamanho {{ t.tamanho }} deste EPI? O histórico de estoque e entregas é mantido, mas ele deixa de aparecer nas próximas entregas/movimentações.">
-                  <button class="botao secundario pequeno" type="submit">Remover</button>
-                </form>
+                <button class="botao secundario pequeno" type="submit" form="tam-remover-{{ t.id }}">Remover</button>
               {% else %}
                 <span class="selo cinza" style="display:block;margin-bottom:6px">Removido</span>
-                <form method="post" action="{{ url_for('epis.tamanho_reativar', epi_id=epi.id, tamanho_id=t.id) }}">
-                  <button class="botao secundario pequeno" type="submit">Reativar</button>
-                </form>
+                <button class="botao secundario pequeno" type="submit" form="tam-reativar-{{ t.id }}">Reativar</button>
               {% endif %}
             </div>
           </div>
@@ -137,6 +132,24 @@
         <a class="botao secundario" href="{{ url_for('epis.listar') }}">Cancelar</a>
       </div>
     </form>
+
+    {# Os formulários de remover/reativar tamanho ficam FORA do form principal
+       de propósito: <form> dentro de <form> é HTML inválido e faz o navegador
+       fechar o form principal cedo demais (quebrando o botão "Salvar EPI").
+       Os botões acima referenciam estes forms pelo atributo form="...", que
+       funciona mesmo eles não sendo descendentes um do outro. #}
+    {% if epi %}
+      {% for t in tamanhos %}
+        {% if t.ativo %}
+          <form id="tam-remover-{{ t.id }}" method="post" hidden
+                action="{{ url_for('epis.tamanho_remover', epi_id=epi.id, tamanho_id=t.id) }}"
+                data-confirmar="Remover o tamanho {{ t.tamanho }} deste EPI? O histórico de estoque e entregas é mantido, mas ele deixa de aparecer nas próximas entregas/movimentações."></form>
+        {% else %}
+          <form id="tam-reativar-{{ t.id }}" method="post" hidden
+                action="{{ url_for('epis.tamanho_reativar', epi_id=epi.id, tamanho_id=t.id) }}"></form>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
   </div>
 </main>
 {% endblock %}
