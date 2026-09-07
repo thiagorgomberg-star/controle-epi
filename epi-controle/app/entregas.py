@@ -26,11 +26,14 @@ def listar():
     colaboradores = query_db(
         "SELECT id, nome, matricula FROM usuarios WHERE ativo = 1 ORDER BY nome"
     )
-    epis = query_db(
-        "SELECT id, nome, ca_numero, ca_validade, tamanho, estoque_atual FROM epis WHERE ativo = 1 ORDER BY nome"
+    tamanhos = query_db(
+        """SELECT et.id, et.tamanho, et.estoque_atual, e.id AS epi_id, e.nome, e.ca_numero, e.ca_validade
+           FROM epi_tamanhos et JOIN epis e ON e.id = et.epi_id
+           WHERE et.ativo = 1 AND e.ativo = 1
+           ORDER BY e.nome, et.tamanho"""
     )
     return render_template(
-        "admin/entregas.html", entregas=entregas, colaboradores=colaboradores, epis=epis,
+        "admin/entregas.html", entregas=entregas, colaboradores=colaboradores, tamanhos=tamanhos,
         hoje=datetime.now().strftime("%Y-%m-%d"),
     )
 
@@ -38,47 +41,54 @@ def listar():
 @bp.route("/nova", methods=["POST"])
 @roles_required("admin", "almoxarife")
 def nova():
-    epi_id = request.form.get("epi_id", type=int)
+    epi_tamanho_id = request.form.get("epi_tamanho_id", type=int)
     colaborador_id = request.form.get("colaborador_id", type=int)
     quantidade = request.form.get("quantidade", type=int) or 1
-    tamanho = request.form.get("tamanho", "").strip()
     motivo = request.form.get("motivo", "Entrega inicial").strip()
     data_entrega = request.form.get("data_entrega") or datetime.now().strftime("%Y-%m-%d")
     observacoes = request.form.get("observacoes", "").strip()
 
-    epi = query_db("SELECT * FROM epis WHERE id = ?", (epi_id,), one=True)
+    variante = query_db(
+        """SELECT et.*, e.nome AS epi_nome, e.ca_numero, e.ca_validade, e.vida_util_dias
+           FROM epi_tamanhos et JOIN epis e ON e.id = et.epi_id WHERE et.id = ?""",
+        (epi_tamanho_id,), one=True,
+    )
     colaborador = query_db("SELECT * FROM usuarios WHERE id = ?", (colaborador_id,), one=True)
 
-    if epi is None or colaborador is None:
-        flash("Selecione o colaborador e o EPI.", "erro")
+    if variante is None or colaborador is None:
+        flash("Selecione o colaborador e o EPI/tamanho.", "erro")
         return redirect(url_for("entregas.listar"))
 
-    if quantidade > epi["estoque_atual"]:
-        flash(f"Saldo insuficiente em estoque para {epi['nome']} (disponível: {epi['estoque_atual']}).", "erro")
+    if quantidade > variante["estoque_atual"]:
+        flash(
+            f"Saldo insuficiente em estoque para {variante['epi_nome']} "
+            f"(tam. {variante['tamanho']}, disponível: {variante['estoque_atual']}).",
+            "erro",
+        )
         return redirect(url_for("entregas.listar"))
 
     try:
         data_troca = (
-            datetime.strptime(data_entrega, "%Y-%m-%d") + timedelta(days=epi["vida_util_dias"])
+            datetime.strptime(data_entrega, "%Y-%m-%d") + timedelta(days=variante["vida_util_dias"])
         ).strftime("%Y-%m-%d")
     except ValueError:
         data_troca = None
 
     db = get_db()
     entrega_id = execute_db(
-        """INSERT INTO entregas (epi_id, colaborador_id, direcionado_por, quantidade, tamanho,
+        """INSERT INTO entregas (epi_id, epi_tamanho_id, colaborador_id, direcionado_por, quantidade, tamanho,
                                   motivo, data_entrega, data_troca_prevista, ca_numero,
                                   ca_validade, observacoes, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente')""",
-        (epi_id, colaborador_id, get_current_user()["id"], quantidade,
-         tamanho or epi["tamanho"], motivo, data_entrega, data_troca,
-         epi["ca_numero"], epi["ca_validade"], observacoes),
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente')""",
+        (variante["epi_id"], epi_tamanho_id, colaborador_id, get_current_user()["id"], quantidade,
+         variante["tamanho"], motivo, data_entrega, data_troca,
+         variante["ca_numero"], variante["ca_validade"], observacoes),
     )
-    db.execute("UPDATE epis SET estoque_atual = estoque_atual - ? WHERE id = ?", (quantidade, epi_id))
+    db.execute("UPDATE epi_tamanhos SET estoque_atual = estoque_atual - ? WHERE id = ?", (quantidade, epi_tamanho_id))
     db.execute(
-        """INSERT INTO estoque_movimentacoes (epi_id, tipo, quantidade, motivo, usuario_id)
-           VALUES (?, 'saida', ?, ?, ?)""",
-        (epi_id, quantidade, f"Entrega para {colaborador['nome']}", get_current_user()["id"]),
+        """INSERT INTO estoque_movimentacoes (epi_id, epi_tamanho_id, tipo, quantidade, motivo, usuario_id)
+           VALUES (?, ?, 'saida', ?, ?, ?)""",
+        (variante["epi_id"], epi_tamanho_id, quantidade, f"Entrega para {colaborador['nome']}", get_current_user()["id"]),
     )
     db.commit()
 
