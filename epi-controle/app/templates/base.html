@@ -47,6 +47,62 @@
 
   {% block conteudo %}{% endblock %}
 
+  <div id="modal-confirmacao" class="modal-fundo" hidden>
+    <div class="modal-caixa">
+      <p id="modal-confirmacao-texto"></p>
+      <div class="modal-botoes">
+        <button type="button" class="botao secundario pequeno" id="modal-confirmacao-cancelar">Cancelar</button>
+        <button type="button" class="botao pequeno" id="modal-confirmacao-confirmar">Confirmar</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    // Confirmação de ações destrutivas (remover, desativar, etc.) sem depender
+    // de window.confirm() — em alguns navegadores/webviews embutidos o
+    // confirm() nativo não exibe nada e simplesmente retorna false na hora,
+    // fazendo o botão parecer que "não faz nada". Qualquer <form> com o
+    // atributo data-confirmar="mensagem" passa por este modal em vez disso.
+    (function () {
+      var modal = document.getElementById("modal-confirmacao");
+      var texto = document.getElementById("modal-confirmacao-texto");
+      var btnCancelar = document.getElementById("modal-confirmacao-cancelar");
+      var btnConfirmar = document.getElementById("modal-confirmacao-confirmar");
+      var formPendente = null;
+
+      function fechar() {
+        modal.hidden = true;
+        formPendente = null;
+      }
+
+      document.addEventListener("submit", function (e) {
+        var form = e.target;
+        if (form && form.getAttribute && form.getAttribute("data-confirmar")) {
+          e.preventDefault();
+          texto.textContent = form.getAttribute("data-confirmar");
+          formPendente = form;
+          modal.hidden = false;
+        }
+      }, true);
+
+      btnConfirmar.addEventListener("click", function () {
+        var form = formPendente;
+        modal.hidden = true;
+        formPendente = null;
+        // form.submit() (ao contrário de .requestSubmit()) não dispara o
+        // evento "submit" de novo, então não reabre o modal.
+        if (form) form.submit();
+      });
+
+      btnCancelar.addEventListener("click", fechar);
+      modal.addEventListener("click", function (e) {
+        if (e.target === modal) fechar();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !modal.hidden) fechar();
+      });
+    })();
+  </script>
+
   {% block scripts %}{% endblock %}
 </body>
 </html>
