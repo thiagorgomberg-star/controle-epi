@@ -15,6 +15,7 @@ em COLUNAS_CANDIDATAS abaixo e ajuste os nomes de acordo com o cabeçalho real
 do arquivo baixado (rode `flask --app app inspecionar-ca <arquivo>` para ver
 as colunas encontradas).
 """
+import csv
 import io
 import zipfile
 from datetime import datetime
@@ -106,29 +107,47 @@ def _baixar_zip_bytes():
     raise RuntimeError(f"Não foi possível baixar a base do CAEPI: {ultimo_erro}")
 
 
-def _extrair_dataframe(zip_bytes):
-    import pandas as pd
+def _detectar_dialeto(primeira_linha_bytes):
+    """Descobre o encoding e o separador olhando só a linha de cabeçalho.
 
+    Evita usar pandas aqui de propósito: a base oficial tem centenas de
+    milhares de linhas, e ler o arquivo inteiro num DataFrame (ainda mais
+    com engine="python") usa memória demais para o plano gratuito do Render
+    (512MB) — foi exatamente isso que derrubou o processo por falta de
+    memória. Olhar só a primeira linha é suficiente pra descobrir o formato.
+    """
+    for encoding in ("latin-1", "utf-8", "cp1252"):
+        try:
+            linha = primeira_linha_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        for sep in (";", "\t", ","):
+            if linha.count(sep) > 2:
+                return encoding, sep
+    raise RuntimeError("Não foi possível interpretar o formato do arquivo da base CAEPI.")
+
+
+def _extrair_zip(zip_bytes):
+    """Descompacta o zip oficial e devolve os bytes do arquivo de dados."""
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
         nomes = [n for n in z.namelist() if not n.endswith("/")]
         if not nomes:
             raise RuntimeError("Arquivo zip da base CAEPI veio vazio.")
         alvo = nomes[0]
         with z.open(alvo) as f:
-            conteudo = f.read()
+            return f.read()
 
-    for encoding in ("latin-1", "utf-8", "cp1252"):
-        for sep in (";", "\t", ","):
-            try:
-                df = pd.read_csv(
-                    io.BytesIO(conteudo), sep=sep, encoding=encoding,
-                    dtype=str, engine="python", on_bad_lines="skip",
-                )
-                if df.shape[1] > 2:
-                    return df
-            except Exception:  # noqa: BLE001
-                continue
-    raise RuntimeError("Não foi possível interpretar o formato do arquivo da base CAEPI.")
+
+def _ler_linhas_ca(conteudo_bytes):
+    """Gera um dict por linha do CSV oficial, sem carregar tudo em memória
+    de uma vez (csv.DictReader é um iterador — processa linha a linha)."""
+    primeira_linha = conteudo_bytes.split(b"\n", 1)[0]
+    encoding, sep = _detectar_dialeto(primeira_linha)
+    texto = io.StringIO(conteudo_bytes.decode(encoding, errors="replace"))
+    leitor = csv.DictReader(texto, delimiter=sep)
+    if not leitor.fieldnames:
+        raise RuntimeError("Não foi possível interpretar o formato do arquivo da base CAEPI.")
+    return leitor
 
 
 def _normalizar_data(texto):
@@ -169,11 +188,17 @@ _TAMANHO_LOTE = 500
 
 
 def sincronizar_base_ca():
-    """Baixa a base oficial, interpreta e grava em ca_cache. Retorna (ok, mensagem, total)."""
+    """Baixa a base oficial, interpreta e grava em ca_cache. Retorna (ok, mensagem, total).
+
+    Processa o arquivo em streaming (linha a linha, gravando em lotes) em vez
+    de carregar tudo em memória de uma vez — a base oficial tem centenas de
+    milhares de linhas, e o plano gratuito do Render só tem 512MB de RAM.
+    """
     try:
         zip_bytes = _baixar_zip_bytes()
-        df = _extrair_dataframe(zip_bytes)
-        mapa = _mapear_colunas(df.columns)
+        conteudo = _extrair_zip(zip_bytes)
+        leitor = _ler_linhas_ca(conteudo)
+        mapa = _mapear_colunas(leitor.fieldnames)
 
         if "numero_ca" not in mapa:
             raise RuntimeError(
@@ -181,36 +206,25 @@ def sincronizar_base_ca():
                 "O layout oficial pode ter mudado — ajuste COLUNAS_CANDIDATAS em app/ca_sync.py."
             )
 
-        agora = datetime.now().isoformat(timespec="seconds")
-        # Usamos um dict (numero_ca -> linha) em vez de gravar direto: se o
-        # arquivo oficial repetir o mesmo CA em mais de uma linha, mantemos
-        # só a última — e evitamos que um único INSERT tente atualizar a
-        # mesma linha duas vezes (o Postgres não permite isso em ON CONFLICT).
-        registros = {}
-        for _, row in df.iterrows():
-            numero_ca = str(row.get(mapa.get("numero_ca"), "")).strip()
-            if not numero_ca or numero_ca.lower() == "nan":
-                continue
-            registros[numero_ca] = (
-                numero_ca,
-                str(row.get(mapa.get("situacao"), "") or ""),
-                _normalizar_data(row.get(mapa.get("validade"), "")),
-                str(row.get(mapa.get("fabricante_cnpj"), "") or ""),
-                str(row.get(mapa.get("fabricante_nome"), "") or ""),
-                str(row.get(mapa.get("equipamento_nome"), "") or ""),
-                str(row.get(mapa.get("descricao"), "") or ""),
-                agora,
-            )
-
-        valores = list(registros.values())
-        total = len(valores)
-
         db = get_db()
         colunas_sql = "(" + ", ".join(_COLUNAS_CA_CACHE) + ")"
-        for inicio in range(0, total, _TAMANHO_LOTE):
-            lote = valores[inicio:inicio + _TAMANHO_LOTE]
-            marcadores = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(lote))
-            args_lote = [valor for linha in lote for valor in linha]
+        agora = datetime.now().isoformat(timespec="seconds")
+        total = 0
+        # Dict só com as linhas do lote atual (no máximo _TAMANHO_LOTE de
+        # cada vez) — se o mesmo CA aparecer duas vezes dentro do MESMO lote,
+        # mantemos a última (o Postgres não permite que um único INSERT
+        # atualize a mesma linha duas vezes via ON CONFLICT). Repetições em
+        # lotes diferentes não têm problema: o lote mais recente simplesmente
+        # sobrescreve o valor gravado pelo lote anterior.
+        lote = {}
+
+        def _gravar_lote():
+            nonlocal total
+            if not lote:
+                return
+            valores = list(lote.values())
+            marcadores = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(valores))
+            args_lote = [valor for linha in valores for valor in linha]
             db.execute(
                 f"INSERT INTO ca_cache {colunas_sql} VALUES {marcadores} {_UPSERT_CA_CACHE_SQL}",
                 args_lote,
@@ -219,6 +233,27 @@ def sincronizar_base_ca():
             # no meio (timeout, queda de conexão), o que já foi processado
             # não se perde e a próxima sincronização continua de onde parou.
             db.commit()
+            total += len(valores)
+            lote.clear()
+
+        for row in leitor:
+            numero_ca = (row.get(mapa.get("numero_ca")) or "").strip()
+            if not numero_ca or numero_ca.lower() == "nan":
+                continue
+            lote[numero_ca] = (
+                numero_ca,
+                (row.get(mapa.get("situacao")) or "").strip(),
+                _normalizar_data(row.get(mapa.get("validade"))),
+                (row.get(mapa.get("fabricante_cnpj")) or "").strip(),
+                (row.get(mapa.get("fabricante_nome")) or "").strip(),
+                (row.get(mapa.get("equipamento_nome")) or "").strip(),
+                (row.get(mapa.get("descricao")) or "").strip(),
+                agora,
+            )
+            if len(lote) >= _TAMANHO_LOTE:
+                _gravar_lote()
+        _gravar_lote()  # o restante (lote incompleto no final do arquivo)
+
         db.execute(
             "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
             ("sucesso", total, f"{total} certificados importados/atualizados."),
