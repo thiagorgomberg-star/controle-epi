@@ -242,6 +242,78 @@ def buscar_ca(numero_ca):
     return query_db("SELECT * FROM ca_cache WHERE numero_ca = ?", (numero_ca,), one=True)
 
 
+# --- Sincronização automática semanal (disparada pelo login) ---------------
+# Em vez de depender de um agendador externo (cron) — que o plano gratuito do
+# Render não oferece —, a cada login verificamos se a base já foi sincronizada
+# nesta semana civil (segunda a domingo). Se não, a primeira pessoa a logar
+# na semana dispara a sincronização em segundo plano (thread separada), sem
+# atrasar o login dela.
+
+def _semana_civil(momento):
+    """(ano ISO, semana ISO) de um datetime — a semana civil começa na segunda-feira."""
+    ano, semana, _ = momento.isocalendar()
+    return (ano, semana)
+
+
+def _sincronizacao_pendente_esta_semana():
+    """True se ainda não tentamos sincronizar (sucesso, erro ou em andamento)
+    nesta semana civil — ou se nunca sincronizamos."""
+    ultimo = query_db("SELECT executado_em FROM sync_log ORDER BY id DESC LIMIT 1", one=True)
+    if ultimo is None:
+        return True
+    try:
+        quando = datetime.strptime(ultimo["executado_em"][:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return True
+    return _semana_civil(quando) != _semana_civil(datetime.now())
+
+
+def _disparar_sincronizacao_em_segundo_plano(app, mensagem_inicial):
+    """Grava um registro "em_andamento" e sobe uma thread para rodar a
+    sincronização de verdade — sem segurar a requisição HTTP que a disparou.
+
+    Isso é essencial no plano gratuito do Render: ele roda só 1 worker, e
+    baixar/interpretar/gravar a base oficial (dezenas de milhares de linhas)
+    pode levar mais de um minuto. Se isso acontecesse dentro da própria
+    requisição, o único worker ficaria ocupado tempo demais, a plataforma
+    acha que o serviço travou e reinicia o processo no meio da sincronização
+    — foi exatamente isso que aconteceu quando o botão "Sincronizar agora"
+    chamava sincronizar_base_ca() diretamente e esperava o resultado.
+    """
+    execute_db(
+        "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
+        ("em_andamento", None, mensagem_inicial),
+    )
+
+    import threading
+
+    def _tarefa():
+        with app.app_context():
+            sincronizar_base_ca()
+
+    threading.Thread(target=_tarefa, daemon=True, name="sync-ca").start()
+
+
+def verificar_e_disparar_sincronizacao_semanal(app):
+    """Chamada a cada login bem-sucedido. Se a base de CA ainda não foi
+    sincronizada nesta semana civil, dispara a sincronização em segundo
+    plano — sem atrasar o login de quem a disparou.
+
+    O registro "em_andamento" gravado aqui também serve de trava: um
+    segundo login alguns segundos depois já vê a semana como "não pendente"
+    e não dispara uma segunda sincronização em paralelo.
+    """
+    try:
+        if not _sincronizacao_pendente_esta_semana():
+            return
+        _disparar_sincronizacao_em_segundo_plano(
+            app, "Sincronização automática semanal iniciada em segundo plano."
+        )
+    except Exception:  # noqa: BLE001
+        # Nunca deixamos um problema aqui atrapalhar o login de ninguém.
+        return
+
+
 # --- Rotas web -------------------------------------------------------------
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for, flash
 from .auth import roles_required
@@ -269,8 +341,16 @@ def buscar():
 @bp.route("/sincronizar", methods=["POST"])
 @roles_required("admin")
 def sincronizar():
-    ok, mensagem, total = sincronizar_base_ca()
-    flash(mensagem, "sucesso" if ok else "erro")
+    from flask import current_app
+    _disparar_sincronizacao_em_segundo_plano(
+        current_app._get_current_object(),
+        "Sincronização manual iniciada em segundo plano.",
+    )
+    flash(
+        "Sincronização iniciada em segundo plano — a base é grande e pode levar um ou dois "
+        "minutos. Atualize esta página daqui a pouco para ver o resultado no histórico abaixo.",
+        "sucesso",
+    )
     return redirect(request.referrer or url_for("epis.listar"))
 
 
