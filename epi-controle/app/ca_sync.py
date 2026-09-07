@@ -102,12 +102,25 @@ def _baixar_uma_tentativa():
                         f"O site devolveu HTTP {resp.status_code} mas o conteúdo não é um "
                         f"arquivo zip (Content-Type: {tipo}). Início do conteúdo: {trecho!r}"
                     )
+                content_length_esperado = resp.headers.get("Content-Length")
             # O começo "PK" não garante um arquivo íntegro — uma resposta
-            # cortada no meio do download (comum em redes instáveis) também
-            # pode começar com "PK" e mesmo assim não abrir como zip. Testamos
-            # isso aqui, antes de considerar a tentativa bem-sucedida.
-            with zipfile.ZipFile(io.BytesIO(conteudo)):
-                pass
+            # cortada no meio do download (comum em redes instáveis, ou uma
+            # técnica anti-bot que devolve um começo de arquivo válido mas
+            # corta o corpo) também pode começar com "PK" e mesmo assim não
+            # abrir como zip. Testamos isso aqui, antes de considerar a
+            # tentativa bem-sucedida — e, se falhar, registramos o tamanho
+            # baixado vs. o esperado para confirmar se foi truncamento.
+            try:
+                with zipfile.ZipFile(io.BytesIO(conteudo)):
+                    pass
+            except zipfile.BadZipFile as e:
+                detalhe = f"{len(conteudo)} bytes baixados"
+                if not url.startswith("ftp://") and content_length_esperado:
+                    detalhe += f" de {content_length_esperado} esperados (Content-Length)"
+                raise RuntimeError(
+                    f"Resposta começou com assinatura de zip válida, mas o arquivo não abriu "
+                    f"({e}) — provável download incompleto/truncado ({detalhe})."
+                )
             return conteudo
         except Exception as e:  # noqa: BLE001
             ultimo_erro = e
