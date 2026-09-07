@@ -1,14 +1,12 @@
 import base64
-import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from flask import (
-    Blueprint, current_app, flash, redirect, render_template, request, url_for
+    Blueprint, flash, redirect, render_template, request, url_for
 )
 
 from .auth import roles_required, login_required, get_current_user
-from .db import get_db, query_db, execute_db
+from .db import get_db, query_db, execute_db, salvar_arquivo
 
 bp = Blueprint("entregas", __name__, url_prefix="/entregas")
 
@@ -93,7 +91,7 @@ def nova():
 def aceitar(entrega_id):
     user = get_current_user()
     entrega = query_db(
-        """SELECT en.*, e.nome AS epi_nome, e.descricao AS epi_descricao, e.foto_path AS epi_foto
+        """SELECT en.*, e.nome AS epi_nome, e.descricao AS epi_descricao, e.foto_arquivo_id AS epi_foto_arquivo_id
            FROM entregas en JOIN epis e ON e.id = en.epi_id
            WHERE en.id = ?""",
         (entrega_id,), one=True,
@@ -125,21 +123,18 @@ def aceitar(entrega_id):
             flash("É necessário tirar uma foto no momento do aceite.", "erro")
             return render_template("colaborador/aceite.html", entrega=entrega)
 
-        upload_dir = Path(current_app.config["UPLOAD_FOLDER"])
-
-        assinatura_nome = f"assinaturas/{uuid.uuid4().hex}.png"
-        with open(upload_dir / assinatura_nome, "wb") as f:
-            f.write(base64.b64decode(assinatura_b64.split(",", 1)[1]))
-
-        foto_nome = f"fotos/{uuid.uuid4().hex}.png"
-        with open(upload_dir / foto_nome, "wb") as f:
-            f.write(base64.b64decode(foto_b64.split(",", 1)[1]))
+        assinatura_arquivo_id = salvar_arquivo(
+            base64.b64decode(assinatura_b64.split(",", 1)[1]), "image/png"
+        )
+        foto_arquivo_id = salvar_arquivo(
+            base64.b64decode(foto_b64.split(",", 1)[1]), "image/png"
+        )
 
         db = get_db()
         db.execute(
-            """INSERT INTO aceites (entrega_id, assinatura_path, foto_path, ip_address, user_agent)
+            """INSERT INTO aceites (entrega_id, assinatura_arquivo_id, foto_arquivo_id, ip_address, user_agent)
                VALUES (?, ?, ?, ?, ?)""",
-            (entrega_id, assinatura_nome, foto_nome, request.remote_addr,
+            (entrega_id, assinatura_arquivo_id, foto_arquivo_id, request.remote_addr,
              request.headers.get("User-Agent", "")[:255]),
         )
         db.execute("UPDATE entregas SET status = 'aceito' WHERE id = ?", (entrega_id,))
