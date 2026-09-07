@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block titulo %}{{ 'Editar EPI' if epi else 'Novo EPI' }} | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo" style="max-width:640px">
+  <h1>{{ 'Editar EPI' if epi else 'Cadastrar EPI' }}</h1>
+  <p class="subtitulo">Digite o número do CA e os dados oficiais (fabricante, descrição, validade) são
+    preenchidos automaticamente pela base do Ministério do Trabalho. Você pode ajustar manualmente se precisar.</p>
+
+  <div class="cartao">
+    <form method="post" enctype="multipart/form-data">
+      <label for="ca_numero">Número do CA</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="ca_numero" name="ca_numero" inputmode="numeric"
+               value="{{ epi.ca_numero if epi else '' }}" placeholder="ex.: 26449" required style="flex:1">
+        <span id="status-busca-ca" style="font-size:0.8rem;color:var(--cinza-600);white-space:nowrap"></span>
+      </div>
+      <p class="campo-ajuda" id="ca-nao-encontrado" hidden>
+        Não encontrei esse CA na base local ainda. Preencha os campos manualmente ou
+        <a href="{{ url_for('ca_sync.status') }}" target="_blank">sincronize a base</a> se ela nunca rodou.
+      </p>
+
+      <label for="nome">Nome do EPI</label>
+      <input type="text" id="nome" name="nome" value="{{ epi.nome if epi else '' }}" required>
+
+      <label for="descricao">Descrição</label>
+      <textarea id="descricao" name="descricao">{{ epi.descricao if epi else '' }}</textarea>
+
+      <div class="linha-campos">
+        <div>
+          <label for="fabricante">Fabricante</label>
+          <input type="text" id="fabricante" name="fabricante" value="{{ epi.fabricante if epi else '' }}">
+        </div>
+        <div>
+          <label for="tamanho">Tamanho</label>
+          <input type="text" id="tamanho" name="tamanho" value="{{ epi.tamanho if epi else '' }}" placeholder="Único">
+        </div>
+      </div>
+
+      <div class="linha-campos">
+        <div>
+          <label for="ca_validade">Validade do CA</label>
+          <input type="date" id="ca_validade" name="ca_validade" value="{{ epi.ca_validade if epi else '' }}">
+        </div>
+        <div>
+          <label for="vida_util_dias">Vida útil (dias de uso)</label>
+          <input type="number" id="vida_util_dias" name="vida_util_dias" min="1" value="{{ epi.vida_util_dias if epi else 180 }}">
+        </div>
+      </div>
+
+      {% if not epi %}
+      <div class="linha-campos">
+        <div>
+          <label for="estoque_inicial">Estoque inicial</label>
+          <input type="number" id="estoque_inicial" name="estoque_inicial" min="0" value="0">
+        </div>
+        <div>
+          <label for="estoque_minimo">Estoque mínimo</label>
+          <input type="number" id="estoque_minimo" name="estoque_minimo" min="0" value="0">
+        </div>
+      </div>
+      {% else %}
+      <label for="estoque_minimo">Estoque mínimo (alerta)</label>
+      <input type="number" id="estoque_minimo" name="estoque_minimo" min="0" value="{{ epi.estoque_minimo }}">
+      <p class="campo-ajuda">Estoque atual: {{ epi.estoque_atual }} — ajuste pela tela de Estoque.</p>
+      {% endif %}
+
+      <label for="foto">Foto do EPI</label>
+      <input type="file" id="foto" name="foto" accept="image/*">
+      {% if epi and epi.foto_path %}
+        <img src="{{ url_for('uploads', subpath=epi.foto_path) }}" alt="" style="width:80px;margin-top:8px;border-radius:8px">
+      {% endif %}
+
+      <button class="botao" type="submit">Salvar EPI</button>
+      <a class="botao secundario" href="{{ url_for('epis.listar') }}">Cancelar</a>
+    </form>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const campoCA = document.getElementById("ca_numero");
+  const statusBusca = document.getElementById("status-busca-ca");
+  const avisoNaoEncontrado = document.getElementById("ca-nao-encontrado");
+  let temporizador = null;
+
+  function preencherSeVazio(id, valor) {
+    const campo = document.getElementById(id);
+    if (campo && !campo.value && valor) campo.value = valor;
+  }
+
+  campoCA.addEventListener("input", () => {
+    clearTimeout(temporizador);
+    const numero = campoCA.value.trim();
+    avisoNaoEncontrado.hidden = true;
+    if (!numero) { statusBusca.textContent = ""; return; }
+    statusBusca.textContent = "Buscando…";
+    temporizador = setTimeout(async () => {
+      try {
+        const resp = await fetch(`{{ url_for('ca_sync.buscar') }}?numero=${encodeURIComponent(numero)}`);
+        const dados = await resp.json();
+        if (dados.encontrado) {
+          statusBusca.textContent = "CA encontrado ✓";
+          preencherSeVazio("nome", dados.equipamento_nome);
+          preencherSeVazio("descricao", dados.descricao);
+          preencherSeVazio("fabricante", dados.fabricante_nome);
+          const campoValidade = document.getElementById("ca_validade");
+          if (campoValidade && !campoValidade.value && dados.validade) {
+            campoValidade.value = dados.validade;
+          }
+        } else {
+          statusBusca.textContent = "";
+          avisoNaoEncontrado.hidden = false;
+        }
+      } catch (e) {
+        statusBusca.textContent = "";
+      }
+    }, 450);
+  });
+</script>
+{% endblock %}

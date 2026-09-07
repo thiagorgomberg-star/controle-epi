@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block titulo %}Colaboradores | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Base de colaboradores</h1>
+  <p class="subtitulo">Cadastre usuários com cargo e nível de acesso, ou importe uma planilha.</p>
+
+  <div class="grid-2">
+    <div class="cartao">
+      <h2>Novo usuário</h2>
+      <form method="post" action="{{ url_for('colaboradores.novo') }}">
+        <label for="nome">Nome</label>
+        <input type="text" id="nome" name="nome" required>
+        <label for="email">E-mail</label>
+        <input type="email" id="email" name="email" required>
+        <div class="linha-campos">
+          <div>
+            <label for="matricula">Matrícula</label>
+            <input type="text" id="matricula" name="matricula">
+          </div>
+          <div>
+            <label for="cargo">Função</label>
+            <input type="text" id="cargo" name="cargo">
+          </div>
+        </div>
+        <div class="linha-campos">
+          <div>
+            <label for="setor">Setor</label>
+            <input type="text" id="setor" name="setor">
+          </div>
+          <div>
+            <label for="papel">Nível de acesso</label>
+            <select id="papel" name="papel">
+              <option value="colaborador">Colaborador</option>
+              <option value="almoxarife">Almoxarife</option>
+              <option value="admin">Administrador SESMT</option>
+            </select>
+          </div>
+        </div>
+        <button class="botao" type="submit">Cadastrar colaborador</button>
+      </form>
+    </div>
+
+    <div class="cartao">
+      <h2>Importar planilha</h2>
+      <form method="post" action="{{ url_for('colaboradores.importar') }}" enctype="multipart/form-data">
+        <label for="planilha">Arquivo .xlsx ou .csv</label>
+        <input type="file" id="planilha" name="planilha" accept=".xlsx,.csv" required>
+        <button class="botao" type="submit">Importar</button>
+      </form>
+      <p class="campo-ajuda" style="margin-top:14px">
+        Use as colunas: <strong>nome, email</strong> (obrigatórias), matricula, cpf, cargo, setor,
+        telefone e nivel (admin, almoxarife ou colaborador). A senha inicial é gerada
+        automaticamente para cada colaborador importado.
+      </p>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Colaboradores cadastrados</h2>
+    <div class="tabela-scroll">
+      <table>
+        <thead><tr><th>Nome</th><th>Matrícula</th><th>Função</th><th>Setor</th><th>Nível</th><th>Situação</th></tr></thead>
+        <tbody>
+          {% for c in colaboradores %}
+            <tr>
+              <td>{{ c.nome }}<br><span style="color:var(--cinza-600);font-size:0.8rem">{{ c.email }}</span></td>
+              <td>{{ c.matricula or '—' }}</td>
+              <td>{{ c.cargo or '—' }}</td>
+              <td>{{ c.setor or '—' }}</td>
+              <td>
+                <form method="post" action="{{ url_for('colaboradores.alterar_papel', usuario_id=c.id) }}" style="display:inline">
+                  <select name="papel" onchange="this.form.submit()" style="padding:4px 6px;font-size:0.82rem">
+                    <option value="colaborador" {{ 'selected' if c.papel == 'colaborador' }}>Colaborador</option>
+                    <option value="almoxarife" {{ 'selected' if c.papel == 'almoxarife' }}>Almoxarife</option>
+                    <option value="admin" {{ 'selected' if c.papel == 'admin' }}>Administrador SESMT</option>
+                  </select>
+                </form>
+              </td>
+              <td>
+                <form method="post" action="{{ url_for('colaboradores.alternar_status', usuario_id=c.id) }}" style="display:inline">
+                  <button class="botao secundario pequeno" type="submit">
+                    {% if c.ativo %}<span class="selo verde">Ativo</span>{% else %}<span class="selo cinza">Inativo</span>{% endif %}
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+{% endblock %}

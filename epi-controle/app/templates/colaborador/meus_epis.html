@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block titulo %}Meus EPIs | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Olá, {{ current_user.nome.split(' ')[0] }}</h1>
+  <p class="subtitulo">{{ current_user.cargo or '—' }} · {{ current_user.setor or '—' }} · Matrícula {{ current_user.matricula or '—' }}</p>
+
+  <div class="grid-cards">
+    <div class="stat {{ 'alerta' if pendentes|length > 0 else '' }}">
+      <div class="numero">{{ pendentes|length }}</div>
+      <div class="rotulo">Aguardando seu aceite</div>
+    </div>
+    <div class="stat {{ 'perigo' if epis_vencidos > 0 else '' }}">
+      <div class="numero">{{ epis_vencidos }}</div>
+      <div class="rotulo">EPIs com troca vencida</div>
+    </div>
+    <div class="stat {{ 'perigo' if ca_vencidos > 0 else '' }}">
+      <div class="numero">{{ ca_vencidos }}</div>
+      <div class="rotulo">CA vencidos</div>
+    </div>
+  </div>
+
+  {% if pendentes %}
+  <div class="cartao">
+    <h2>Aguardando seu aceite</h2>
+    {% for p in pendentes %}
+      <div class="epi-card">
+        <div class="info">
+          <strong>{{ p.epi_nome }}</strong>
+          <span>Qtd. {{ p.quantidade }}{% if p.tamanho %} · tam. {{ p.tamanho }}{% endif %} · entregue em {{ p.data_entrega }}</span>
+        </div>
+        <a class="botao pequeno" href="{{ url_for('entregas.aceitar', entrega_id=p.id) }}">Ver e assinar</a>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="cartao">
+    <h2>Minha ficha de EPI</h2>
+    {% if not historico %}
+      <p class="vazio">Nenhum EPI entregue até o momento.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr><th>EPI</th><th>Entrega</th><th>Troca prevista</th><th>CA</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for h in historico %}
+              <tr>
+                <td>{{ h.epi_nome }} {% if h.tamanho %}(tam. {{ h.tamanho }}){% endif %}</td>
+                <td>{{ h.data_entrega }}</td>
+                <td>
+                  {{ h.data_troca_prevista or '—' }}
+                  {% if h.data_troca_prevista and h.data_troca_prevista < hoje %}<span class="selo vermelho">vencido</span>{% endif %}
+                </td>
+                <td>
+                  {{ h.ca_numero or '—' }}
+                  {% if h.ca_validade and h.ca_validade < hoje %}<span class="selo vermelho">CA vencido</span>{% endif %}
+                </td>
+                <td>
+                  {% if h.status == 'aceito' %}<span class="selo verde">Aceito {{ h.aceito_em[:10] if h.aceito_em else '' }}</span>
+                  {% else %}<span class="selo laranja">Pendente</span>{% endif %}
+                </td>
+                <td>
+                  {% if h.status == 'aceito' %}
+                    <a href="{{ url_for('relatorios.ficha_entrega', entrega_id=h.id) }}" target="_blank">PDF</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

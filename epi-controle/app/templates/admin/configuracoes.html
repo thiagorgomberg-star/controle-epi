@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block titulo %}Configuração | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo" style="max-width:560px">
+  <h1>Configuração do SESMT</h1>
+
+  <div class="cartao">
+    <form method="post" enctype="multipart/form-data">
+      <label for="empresa_nome">Empresa</label>
+      <input type="text" id="empresa_nome" name="empresa_nome" value="{{ cfg.empresa_nome or '' }}">
+      <label for="responsavel_sesmt">Responsável pelo SESMT</label>
+      <input type="text" id="responsavel_sesmt" name="responsavel_sesmt" value="{{ cfg.responsavel_sesmt or '' }}">
+      <label for="logo">Logomarca da empresa</label>
+      <input type="file" id="logo" name="logo" accept="image/*">
+      <p class="campo-ajuda">PNG ou JPG. Aparece no topo dos relatórios de entrega em PDF.</p>
+      {% if cfg.logo_path %}
+        <img src="{{ url_for('uploads', subpath=cfg.logo_path) }}" alt="" style="height:40px;margin-top:6px;border-radius:4px">
+      {% endif %}
+      <button class="botao" type="submit">Salvar configuração</button>
+    </form>
+  </div>
+
+  <div class="cartao">
+    <h2>Zerar dados do sistema</h2>
+    <p class="campo-ajuda" style="margin-bottom:14px">
+      Apaga definitivamente EPIs, estoque, movimentações, entregas e a base de CA sincronizada.
+      Colaboradores e esta configuração são mantidos. Não há como desfazer.
+    </p>
+    <form method="post" action="{{ url_for('configuracoes.zerar_dados') }}"
+          onsubmit="return confirm('Tem certeza? Essa ação apaga os dados de EPI e não pode ser desfeita.');">
+      <label for="confirmacao">Digite RESET para liberar o botão</label>
+      <input type="text" id="confirmacao" name="confirmacao" oninput="document.getElementById('btn-zerar').disabled = this.value !== 'RESET'">
+      <button class="botao perigo" id="btn-zerar" type="submit" disabled>Apagar todos os dados</button>
+    </form>
+  </div>
+</main>
+{% endblock %}

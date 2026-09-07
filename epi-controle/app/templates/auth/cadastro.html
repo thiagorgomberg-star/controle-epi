@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block titulo %}Criar acesso | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="container-estreito">
+  <div class="cartao">
+    <h1>Criar acesso</h1>
+    {% if primeiro_acesso %}
+      <div class="destaque-caixa">
+        Este será o primeiro acesso do sistema — ele recebe automaticamente o perfil de
+        <strong>administrador do SESMT</strong>.
+      </div>
+    {% else %}
+      <p class="subtitulo">O acesso é criado como colaborador. O SESMT pode ajustar seu nível depois.</p>
+    {% endif %}
+    <form method="post">
+      <label for="nome">Nome completo</label>
+      <input type="text" id="nome" name="nome" required>
+      <label for="email">E-mail</label>
+      <input type="email" id="email" name="email" required>
+      <div class="linha-campos">
+        <div>
+          <label for="matricula">Matrícula</label>
+          <input type="text" id="matricula" name="matricula">
+        </div>
+        <div>
+          <label for="cargo">Cargo</label>
+          <input type="text" id="cargo" name="cargo">
+        </div>
+      </div>
+      <label for="setor">Setor</label>
+      <input type="text" id="setor" name="setor">
+      <div class="linha-campos">
+        <div>
+          <label for="senha">Senha</label>
+          <input type="password" id="senha" name="senha" minlength="6" required>
+        </div>
+        <div>
+          <label for="senha_confirma">Confirmar senha</label>
+          <input type="password" id="senha_confirma" name="senha_confirma" minlength="6" required>
+        </div>
+      </div>
+      <button class="botao" type="submit" style="width:100%">Criar acesso</button>
+    </form>
+    <p class="rodape-login">
+      Já tem acesso? <a href="{{ url_for('auth.login') }}">Entrar</a>
+    </p>
+  </div>
+</main>
+{% endblock %}

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block titulo %}Estoque | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Estoque</h1>
+  <p class="subtitulo">Saldo por EPI e movimentações de entrada/saída.</p>
+
+  <div class="cartao">
+    <h2>Movimentar estoque</h2>
+    <form method="post" action="{{ url_for('estoque.movimentar') }}">
+      <div class="linha-campos">
+        <div>
+          <label for="epi_id">Item</label>
+          <select id="epi_id" name="epi_id" required>
+            <option value="">Selecione o item</option>
+            {% for epi in epis %}
+              <option value="{{ epi.id }}">{{ epi.nome }} (saldo: {{ epi.estoque_atual }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="tipo">Tipo do movimento</label>
+          <select id="tipo" name="tipo" required>
+            <option value="entrada">Entrada</option>
+            <option value="saida">Saída</option>
+            <option value="ajuste">Ajuste</option>
+          </select>
+        </div>
+      </div>
+      <div class="linha-campos">
+        <div>
+          <label for="quantidade">Quantidade</label>
+          <input type="number" id="quantidade" name="quantidade" min="1" required>
+        </div>
+        <div>
+          <label for="motivo">Motivo</label>
+          <input type="text" id="motivo" name="motivo" placeholder="ex.: compra, inventário, perda">
+        </div>
+      </div>
+      <button class="botao" type="submit">Lançar movimento</button>
+    </form>
+  </div>
+
+  <div class="cartao">
+    <h2>Saldo por EPI</h2>
+    {% if not epis %}
+      <p class="vazio">Nenhum EPI cadastrado ainda.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>EPI</th><th>Fabricante</th><th>Saldo</th><th>Mínimo</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for epi in epis %}
+              <tr>
+                <td>{{ epi.nome }}</td>
+                <td>{{ epi.fabricante or '—' }}</td>
+                <td>{{ epi.estoque_atual }}</td>
+                <td>{{ epi.estoque_minimo }}</td>
+                <td>
+                  {% if epi.estoque_atual <= epi.estoque_minimo %}
+                    <span class="selo vermelho">Baixo</span>
+                  {% else %}
+                    <span class="selo verde">OK</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="cartao">
+    <h2>Últimas movimentações</h2>
+    {% if not movimentacoes %}
+      <p class="vazio">Nenhuma movimentação registrada.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>Data</th><th>Item</th><th>Tipo</th><th>Qtd.</th><th>Motivo</th><th>Usuário</th></tr></thead>
+          <tbody>
+            {% for m in movimentacoes %}
+              <tr>
+                <td>{{ m.criado_em[:16] }}</td>
+                <td>{{ m.epi_nome }}</td>
+                <td>
+                  {% if m.tipo == 'entrada' %}<span class="selo verde">Entrada</span>
+                  {% elif m.tipo == 'saida' %}<span class="selo laranja">Saída</span>
+                  {% else %}<span class="selo cinza">Ajuste</span>{% endif %}
+                </td>
+                <td>{{ m.quantidade }}</td>
+                <td>{{ m.motivo or '—' }}</td>
+                <td>{{ m.usuario_nome or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

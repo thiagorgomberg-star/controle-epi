@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block titulo %}Entregas | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Entregas</h1>
+  <p class="subtitulo">Direcione um EPI a um colaborador. Ele recebe a pendência no painel dele e confirma com assinatura e foto.</p>
+
+  <div class="cartao">
+    <h2>Nova entrega</h2>
+    <form method="post" action="{{ url_for('entregas.nova') }}">
+      <div class="linha-campos">
+        <div>
+          <label for="colaborador_id">Colaborador</label>
+          <select id="colaborador_id" name="colaborador_id" required>
+            <option value="">Selecione o colaborador</option>
+            {% for c in colaboradores %}
+              <option value="{{ c.id }}">{{ c.nome }} — {{ c.matricula or 's/ matrícula' }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="epi_id">EPI</label>
+          <select id="epi_id" name="epi_id" required>
+            <option value="">Selecione o equipamento</option>
+            {% for e in epis %}
+              <option value="{{ e.id }}">{{ e.nome }} — CA {{ e.ca_numero or 's/ CA' }} (saldo: {{ e.estoque_atual }})</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="linha-campos">
+        <div>
+          <label for="quantidade">Quantidade</label>
+          <input type="number" id="quantidade" name="quantidade" min="1" value="1" required>
+        </div>
+        <div>
+          <label for="tamanho">Tamanho (opcional)</label>
+          <input type="text" id="tamanho" name="tamanho">
+        </div>
+      </div>
+      <div class="linha-campos">
+        <div>
+          <label for="motivo">Motivo</label>
+          <select id="motivo" name="motivo">
+            <option>Entrega inicial</option>
+            <option>Troca por vencimento</option>
+            <option>Troca por dano</option>
+            <option>Perda</option>
+            <option>Reposição</option>
+          </select>
+        </div>
+        <div>
+          <label for="data_entrega">Data da entrega</label>
+          <input type="date" id="data_entrega" name="data_entrega" value="{{ hoje }}">
+        </div>
+      </div>
+      <label for="observacoes">Observações</label>
+      <textarea id="observacoes" name="observacoes"></textarea>
+      <button class="botao" type="submit">Registrar entrega</button>
+    </form>
+  </div>
+
+  <div class="cartao">
+    <h2>Histórico de entregas</h2>
+    <p class="campo-ajuda" style="margin-bottom:12px">Status do aceite, vencimento do EPI e do CA.</p>
+    {% if not entregas %}
+      <p class="vazio">Nenhuma entrega registrada ainda.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>Colaborador</th><th>EPI</th><th>Entrega</th><th>Troca</th><th>CA</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {% for en in entregas %}
+              <tr>
+                <td>{{ en.colaborador_nome }}<br><span style="color:var(--cinza-600);font-size:0.8rem">{{ en.colaborador_matricula or '' }}</span></td>
+                <td>{{ en.epi_nome }} ×{{ en.quantidade }}{% if en.tamanho %} · tam. {{ en.tamanho }}{% endif %}</td>
+                <td>{{ en.data_entrega }}</td>
+                <td>{{ en.data_troca_prevista or '—' }}</td>
+                <td>{{ en.ca_numero or '—' }}{% if en.ca_validade %} · {{ en.ca_validade }}{% endif %}</td>
+                <td>
+                  {% if en.status == 'aceito' %}
+                    <span class="selo verde">Aceito {{ en.aceito_em[:10] if en.aceito_em else '' }}</span>
+                  {% else %}
+                    <span class="selo laranja">Pendente</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if en.status == 'aceito' %}
+                    <a href="{{ url_for('relatorios.ficha_entrega', entrega_id=en.id) }}" target="_blank">PDF</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

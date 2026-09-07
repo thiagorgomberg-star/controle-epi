@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Controle de EPI{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {% if current_user %}
+  <header class="topbar">
+    <div class="marca">Controle de EPI</div>
+    <nav>
+      {% if current_user.papel in ('admin', 'almoxarife') %}
+        <a href="{{ url_for('painel.admin_dashboard') }}" class="{{ 'ativo' if request.endpoint == 'painel.admin_dashboard' }}">Painel SESMT</a>
+        <a href="{{ url_for('entregas.listar') }}" class="{{ 'ativo' if request.endpoint == 'entregas.listar' }}">Entregas</a>
+        <a href="{{ url_for('epis.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('epis.') }}">EPIs</a>
+        <a href="{{ url_for('estoque.listar') }}" class="{{ 'ativo' if request.endpoint == 'estoque.listar' }}">Estoque</a>
+        {% if current_user.papel == 'admin' %}
+          <a href="{{ url_for('colaboradores.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('colaboradores.') }}">Colaboradores</a>
+          <a href="{{ url_for('ca_sync.status') }}" class="{{ 'ativo' if request.endpoint == 'ca_sync.status' }}">Base de CA</a>
+          <a href="{{ url_for('configuracoes.editar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('configuracoes.') }}">Configuração</a>
+        {% endif %}
+      {% else %}
+        <a href="{{ url_for('painel.meus_epis') }}" class="{{ 'ativo' if request.endpoint == 'painel.meus_epis' }}">Meus EPIs</a>
+      {% endif %}
+    </nav>
+    <div class="usuario">
+      <span>{{ current_user.nome }}</span>
+      <form action="{{ url_for('auth.logout') }}" method="get" style="display:inline">
+        <button class="sair" type="submit">Sair</button>
+      </form>
+    </div>
+  </header>
+  {% endif %}
+
+  {% with mensagens = get_flashed_messages(with_categories=true) %}
+    {% if mensagens %}
+      <div class="flashes">
+        {% for categoria, mensagem in mensagens %}
+          <div class="flash {{ categoria }}">{{ mensagem }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% block conteudo %}{% endblock %}
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

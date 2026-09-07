@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block titulo %}Base de CA | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
+    <div>
+      <h1>Base oficial de CA</h1>
+      <p class="subtitulo">Sincronizada do Ministério do Trabalho para autopreenchimento no cadastro de EPI.</p>
+    </div>
+    <form method="post" action="{{ url_for('ca_sync.sincronizar') }}">
+      <button class="botao" type="submit">Sincronizar agora</button>
+    </form>
+  </div>
+
+  <div class="grid-cards">
+    <div class="stat">
+      <div class="numero">{{ total_ca }}</div>
+      <div class="rotulo">CAs na base local</div>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Histórico de sincronizações</h2>
+    <p class="campo-ajuda" style="margin-bottom:12px">
+      Em produção, agende esse processo automaticamente (1x por dia) com o comando de linha de
+      comando <code>flask --app app sync-ca</code> no agendador do seu servidor (cron).
+    </p>
+    {% if not logs %}
+      <p class="vazio">Nenhuma sincronização executada ainda.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>Quando</th><th>Status</th><th>Registros</th><th>Mensagem</th></tr></thead>
+          <tbody>
+            {% for log in logs %}
+              <tr>
+                <td>{{ log.executado_em[:16] }}</td>
+                <td>
+                  {% if log.status == 'sucesso' %}<span class="selo verde">Sucesso</span>
+                  {% else %}<span class="selo vermelho">Erro</span>{% endif %}
+                </td>
+                <td>{{ log.total_registros }}</td>
+                <td>{{ log.mensagem }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

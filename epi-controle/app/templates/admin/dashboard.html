@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block titulo %}Painel SESMT | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Painel SESMT</h1>
+  <p class="subtitulo">Controle completo de colaboradores, equipamentos, CAs e entregas.</p>
+
+  <div class="grid-cards">
+    <div class="stat {{ 'alerta' if aceites_pendentes > 0 else '' }}">
+      <div class="numero">{{ aceites_pendentes }}</div>
+      <div class="rotulo">Aceites pendentes</div>
+    </div>
+    <div class="stat {{ 'perigo' if epis_vencidos > 0 else '' }}">
+      <div class="numero">{{ epis_vencidos }}</div>
+      <div class="rotulo">EPIs com troca vencida</div>
+    </div>
+    <div class="stat {{ 'perigo' if ca_vencidos > 0 else '' }}">
+      <div class="numero">{{ ca_vencidos }}</div>
+      <div class="rotulo">CAs vencidos</div>
+    </div>
+    <div class="stat {{ 'alerta' if estoque_baixo > 0 else '' }}">
+      <div class="numero">{{ estoque_baixo }}</div>
+      <div class="rotulo">Itens com estoque baixo</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <a class="cartao" href="{{ url_for('entregas.listar') }}" style="display:block">
+      <h2>Direcionar / acompanhar entregas</h2>
+      <p class="subtitulo" style="margin:0">Direcione um EPI a um colaborador e acompanhe os aceites.</p>
+    </a>
+    <a class="cartao" href="{{ url_for('epis.listar') }}" style="display:block">
+      <h2>Cadastro de EPIs</h2>
+      <p class="subtitulo" style="margin:0">CA, validade, descrição e busca automática pela base oficial.</p>
+    </a>
+    <a class="cartao" href="{{ url_for('estoque.listar') }}" style="display:block">
+      <h2>Estoque</h2>
+      <p class="subtitulo" style="margin:0">Entradas, saídas e saldo por equipamento.</p>
+    </a>
+    {% if current_user.papel == 'admin' %}
+    <a class="cartao" href="{{ url_for('colaboradores.listar') }}" style="display:block">
+      <h2>Colaboradores</h2>
+      <p class="subtitulo" style="margin:0">Cadastro, papéis de acesso e importação em massa.</p>
+    </a>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

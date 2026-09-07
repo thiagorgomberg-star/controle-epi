@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block titulo %}EPIs cadastrados | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
+    <div>
+      <h1>EPIs cadastrados</h1>
+      <p class="subtitulo">Foto, CA (com busca automática), validade e vida útil do equipamento.</p>
+    </div>
+    <a class="botao" href="{{ url_for('epis.novo') }}">Novo EPI</a>
+  </div>
+
+  {% if not epis %}
+    <div class="cartao"><p class="vazio">Nenhum EPI cadastrado ainda.</p></div>
+  {% endif %}
+
+  {% for epi in epis %}
+    <div class="cartao" style="display:flex;gap:16px;align-items:center">
+      {% if epi.foto_path %}
+        <img src="{{ url_for('uploads', subpath=epi.foto_path) }}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px">
+      {% else %}
+        <div style="width:64px;height:64px;border-radius:8px;background:var(--cinza-100)"></div>
+      {% endif %}
+      <div style="flex:1">
+        <strong>{{ epi.nome }}</strong><br>
+        <span style="color:var(--cinza-600);font-size:0.88rem">
+          {{ epi.fabricante or '—' }}{% if epi.tamanho %} · Tam. {{ epi.tamanho }}{% endif %}
+        </span><br>
+        <span style="font-size:0.85rem">
+          CA {{ epi.ca_numero or '—' }} · CA até {{ epi.ca_validade or '—' }} ·
+          Vida útil {{ epi.vida_util_dias }} dias ·
+          Estoque
+          <span class="selo {{ 'vermelho' if epi.estoque_atual <= epi.estoque_minimo else 'verde' }}">{{ epi.estoque_atual }}</span>
+        </span>
+      </div>
+      <a class="botao secundario pequeno" href="{{ url_for('epis.editar', epi_id=epi.id) }}">Editar</a>
+    </div>
+  {% endfor %}
+</main>
+{% endblock %}

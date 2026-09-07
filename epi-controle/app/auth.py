@@ -1,0 +1,129 @@
+import functools
+import re
+
+from flask import (
+    Blueprint, flash, g, redirect, render_template, request, session, url_for
+)
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from .db import get_db, query_db, execute_db
+
+bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def get_current_user():
+    if "user_id" not in session:
+        return None
+    if "_user_cache" not in g:
+        g._user_cache = query_db(
+            "SELECT * FROM usuarios WHERE id = ? AND ativo = 1",
+            (session["user_id"],),
+            one=True,
+        )
+    return g._user_cache
+
+
+def login_required(view):
+    @functools.wraps(view)
+    def wrapped(**kwargs):
+        if get_current_user() is None:
+            session.clear()
+            flash("Faça login para continuar.", "erro")
+            return redirect(url_for("auth.login"))
+        return view(**kwargs)
+    return wrapped
+
+
+def roles_required(*papeis):
+    def decorator(view):
+        @functools.wraps(view)
+        @login_required
+        def wrapped(**kwargs):
+            user = get_current_user()
+            if user["papel"] not in papeis:
+                flash("Você não tem permissão para acessar essa página.", "erro")
+                return redirect(url_for("painel.index_redirect"))
+            return view(**kwargs)
+        return wrapped
+    return decorator
+
+
+def is_admin_almoxarife(user):
+    return user is not None and user["papel"] in ("admin", "almoxarife")
+
+
+@bp.route("/login", methods=("GET", "POST"))
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        senha = request.form.get("senha", "")
+
+        erro = None
+        user = query_db("SELECT * FROM usuarios WHERE email = ?", (email,), one=True)
+
+        if user is None or not check_password_hash(user["senha_hash"], senha):
+            erro = "E-mail ou senha inválidos."
+        elif not user["ativo"]:
+            erro = "Este acesso está desativado. Fale com o SESMT."
+
+        if erro is None:
+            session.clear()
+            session["user_id"] = user["id"]
+            session.permanent = True
+            return redirect(url_for("painel.index_redirect"))
+
+        flash(erro, "erro")
+
+    return render_template("auth/login.html")
+
+
+@bp.route("/cadastro", methods=("GET", "POST"))
+def cadastro():
+    total_usuarios = query_db("SELECT COUNT(*) AS c FROM usuarios", one=True)["c"]
+
+    if request.method == "POST":
+        nome = request.form.get("nome", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        matricula = request.form.get("matricula", "").strip() or None
+        cargo = request.form.get("cargo", "").strip()
+        setor = request.form.get("setor", "").strip()
+        senha = request.form.get("senha", "")
+        senha_confirma = request.form.get("senha_confirma", "")
+
+        erro = None
+        if not nome:
+            erro = "Informe o nome completo."
+        elif not email or not EMAIL_RE.match(email):
+            erro = "Informe um e-mail válido."
+        elif len(senha) < 6:
+            erro = "A senha precisa ter pelo menos 6 caracteres."
+        elif senha != senha_confirma:
+            erro = "As senhas não coincidem."
+        elif query_db("SELECT id FROM usuarios WHERE email = ?", (email,), one=True):
+            erro = "Já existe um acesso com este e-mail."
+
+        if erro is None:
+            papel = "admin" if total_usuarios == 0 else "colaborador"
+            user_id = execute_db(
+                """INSERT INTO usuarios (nome, email, senha_hash, matricula, cargo, setor, papel)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (nome, email, generate_password_hash(senha), matricula, cargo, setor, papel),
+            )
+            session.clear()
+            session["user_id"] = user_id
+            session.permanent = True
+            if papel == "admin":
+                flash("Conta criada com sucesso! Como primeiro acesso, você é o administrador do SESMT.", "sucesso")
+            return redirect(url_for("painel.index_redirect"))
+
+        flash(erro, "erro")
+
+    return render_template("auth/cadastro.html", primeiro_acesso=(total_usuarios == 0))
+
+
+@bp.route("/sair")
+def logout():
+    session.clear()
+    return redirect(url_for("auth.login"))
