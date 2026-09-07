@@ -22,8 +22,8 @@
   <div class="cartao">
     <h2>Histórico de sincronizações</h2>
     <p class="campo-ajuda" style="margin-bottom:12px">
-      Em produção, agende esse processo automaticamente (1x por dia) com o comando de linha de
-      comando <code>flask --app app sync-ca</code> no agendador do seu servidor (cron).
+      Além do botão acima, o sistema sincroniza sozinho 1x por semana: assim que alguém faz login
+      pela primeira vez na semana, a atualização roda em segundo plano sem atrasar o login.
     </p>
     {% if not logs %}
       <p class="vazio">Nenhuma sincronização executada ainda.</p>
@@ -37,6 +37,7 @@
                 <td>{{ log.executado_em[:16] }}</td>
                 <td>
                   {% if log.status == 'sucesso' %}<span class="selo verde">Sucesso</span>
+                  {% elif log.status == 'em_andamento' %}<span class="selo azul">Em andamento</span>
                   {% else %}<span class="selo vermelho">Erro</span>{% endif %}
                 </td>
                 <td>{{ log.total_registros }}</td>
