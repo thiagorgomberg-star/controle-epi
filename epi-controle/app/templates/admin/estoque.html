@@ -3,18 +3,18 @@
 {% block conteudo %}
 <main class="conteudo">
   <h1>Estoque</h1>
-  <p class="subtitulo">Saldo por EPI e movimentações de entrada/saída.</p>
+  <p class="subtitulo">Saldo por EPI e tamanho, e movimentações de entrada/saída.</p>
 
   <div class="cartao">
     <h2>Movimentar estoque</h2>
     <form method="post" action="{{ url_for('estoque.movimentar') }}">
       <div class="linha-campos">
         <div>
-          <label for="epi_id">Item</label>
-          <select id="epi_id" name="epi_id" required>
+          <label for="epi_tamanho_id">Item</label>
+          <select id="epi_tamanho_id" name="epi_tamanho_id" required>
             <option value="">Selecione o item</option>
-            {% for epi in epis %}
-              <option value="{{ epi.id }}">{{ epi.nome }} (saldo: {{ epi.estoque_atual }})</option>
+            {% for t in tamanhos %}
+              <option value="{{ t.id }}">{{ t.epi_nome }} — Tam. {{ t.tamanho }} (saldo: {{ t.estoque_atual }})</option>
             {% endfor %}
           </select>
         </div>
@@ -42,22 +42,23 @@
   </div>
 
   <div class="cartao">
-    <h2>Saldo por EPI</h2>
-    {% if not epis %}
+    <h2>Saldo por EPI e tamanho</h2>
+    {% if not tamanhos %}
       <p class="vazio">Nenhum EPI cadastrado ainda.</p>
     {% else %}
       <div class="tabela-scroll">
         <table>
-          <thead><tr><th>EPI</th><th>Fabricante</th><th>Saldo</th><th>Mínimo</th><th>Status</th></tr></thead>
+          <thead><tr><th>EPI</th><th>Tamanho</th><th>Fabricante</th><th>Saldo</th><th>Mínimo</th><th>Status</th></tr></thead>
           <tbody>
-            {% for epi in epis %}
+            {% for t in tamanhos %}
               <tr>
-                <td>{{ epi.nome }}</td>
-                <td>{{ epi.fabricante or '—' }}</td>
-                <td>{{ epi.estoque_atual }}</td>
-                <td>{{ epi.estoque_minimo }}</td>
+                <td>{{ t.epi_nome }}</td>
+                <td>{{ t.tamanho }}</td>
+                <td>{{ t.fabricante or '—' }}</td>
+                <td>{{ t.estoque_atual }}</td>
+                <td>{{ t.estoque_minimo }}</td>
                 <td>
-                  {% if epi.estoque_atual <= epi.estoque_minimo %}
+                  {% if t.estoque_atual <= t.estoque_minimo %}
                     <span class="selo vermelho">Baixo</span>
                   {% else %}
                     <span class="selo verde">OK</span>
@@ -78,12 +79,13 @@
     {% else %}
       <div class="tabela-scroll">
         <table>
-          <thead><tr><th>Data</th><th>Item</th><th>Tipo</th><th>Qtd.</th><th>Motivo</th><th>Usuário</th></tr></thead>
+          <thead><tr><th>Data</th><th>Item</th><th>Tamanho</th><th>Tipo</th><th>Qtd.</th><th>Motivo</th><th>Usuário</th></tr></thead>
           <tbody>
             {% for m in movimentacoes %}
               <tr>
                 <td>{{ m.criado_em[:16] }}</td>
                 <td>{{ m.epi_nome }}</td>
+                <td>{{ m.tamanho or '—' }}</td>
                 <td>
                   {% if m.tipo == 'entrada' %}<span class="selo verde">Entrada</span>
                   {% elif m.tipo == 'saida' %}<span class="selo laranja">Saída</span>
