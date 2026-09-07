@@ -68,7 +68,9 @@ def admin_dashboard():
         (hoje,), one=True,
     )["c"]
     estoque_baixo = query_db(
-        "SELECT COUNT(*) AS c FROM epis WHERE ativo=1 AND estoque_atual <= estoque_minimo", one=True
+        """SELECT COUNT(*) AS c FROM epi_tamanhos et JOIN epis e ON e.id = et.epi_id
+           WHERE et.ativo=1 AND e.ativo=1 AND et.estoque_atual <= et.estoque_minimo""",
+        one=True,
     )["c"]
 
     return render_template(
