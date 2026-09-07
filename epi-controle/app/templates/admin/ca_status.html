@@ -20,6 +20,22 @@
   </div>
 
   <div class="cartao">
+    <h2>Importar arquivo manualmente</h2>
+    <p class="campo-ajuda" style="margin-bottom:12px">
+      Se a sincronização automática falhar (o site do governo às vezes limita downloads feitos por
+      servidores, mesmo funcionando normalmente pelo navegador), baixe a base você mesmo em
+      <a href="{{ url_consulta_ca }}" target="_blank" rel="noopener">{{ url_consulta_ca }}</a>
+      — clique no botão azul "Base de dados do sistema CAEPI (Download)" — e envie o arquivo baixado
+      (.zip, .csv ou .txt) abaixo.
+    </p>
+    <form method="post" action="{{ url_for('ca_sync.importar') }}" enctype="multipart/form-data"
+          style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <input type="file" name="arquivo" accept=".zip,.csv,.txt" required>
+      <button class="botao" type="submit">Importar arquivo</button>
+    </form>
+  </div>
+
+  <div class="cartao">
     <h2>Histórico de sincronizações</h2>
     <p class="campo-ajuda" style="margin-bottom:12px">
       Além do botão acima, o sistema sincroniza sozinho 1x por semana: assim que alguém faz login
