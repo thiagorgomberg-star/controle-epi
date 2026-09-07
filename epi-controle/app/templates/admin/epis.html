@@ -25,14 +25,20 @@
         <strong>{{ epi.nome }}</strong>
         {% if not epi.ativo %}<span class="selo cinza">Removido</span>{% endif %}
         <br>
-        <span style="color:var(--cinza-600);font-size:0.88rem">
-          {{ epi.fabricante or '—' }}{% if epi.tamanho %} · Tam. {{ epi.tamanho }}{% endif %}
-        </span><br>
+        <span style="color:var(--cinza-600);font-size:0.88rem">{{ epi.fabricante or '—' }}</span><br>
         <span style="font-size:0.85rem">
           CA {{ epi.ca_numero or '—' }} · CA até {{ epi.ca_validade or '—' }} ·
-          Vida útil {{ epi.vida_util_dias }} dias ·
-          Estoque
-          <span class="selo {{ 'vermelho' if epi.estoque_atual <= epi.estoque_minimo else 'verde' }}">{{ epi.estoque_atual }}</span>
+          Vida útil {{ epi.vida_util_dias }} dias
+        </span><br>
+        <span style="font-size:0.85rem">
+          Estoque:
+          {% if not epi.tamanhos %}
+            <span class="selo cinza">nenhum tamanho cadastrado</span>
+          {% else %}
+            {% for t in epi.tamanhos %}
+              <span class="selo {{ 'vermelho' if t.estoque_atual <= t.estoque_minimo else 'verde' }}" style="margin-right:4px">{{ t.tamanho }}: {{ t.estoque_atual }}</span>
+            {% endfor %}
+          {% endif %}
         </span>
       </div>
       <div style="display:flex;gap:8px">
