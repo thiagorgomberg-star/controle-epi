@@ -23,6 +23,7 @@ as colunas encontradas).
 import csv
 import gzip
 import os
+import shutil
 import tempfile
 import zipfile
 from datetime import datetime
@@ -34,6 +35,16 @@ from .db import get_db, execute_db, query_db
 
 URL_ZIP = "https://www.gov.br/trabalho-e-emprego/pt-br/assuntos/inspecao-do-trabalho/seguranca-e-saude-no-trabalho/equipamentos-de-protecao-individual-epi/tgg_export_caepi.zip/@@download/file"
 URL_ZIP_FTP = "ftp://ftp.mtps.gov.br/portal/fiscalizacao/seguranca-e-saude-no-trabalho/caepi/tgg_export_caepi.zip"
+
+# Página oficial onde é possível baixar a base manualmente pelo navegador —
+# o botão "Base de dados do sistema CAEPI (Download)" nessa página gera o
+# arquivo na hora (não é um link direto). Servidores automatizados (como o
+# nosso, rodando no Render) parecem ter a resposta do link acima limitada a
+# um tamanho fixo por algum WAF/CDN do governo — só baixando pelo navegador
+# de uma pessoa de verdade é que o arquivo chega inteiro. Por isso mantemos
+# essa URL aqui, exibida na tela de sincronização, como um link pronto para
+# quem precisar importar a base manualmente (ver rota /ca/importar abaixo).
+URL_CONSULTA_CA = "https://caepi.trabalho.gov.br/internet/ConsultaCAInternet.aspx"
 
 # Nomes possíveis de cada coluna no arquivo oficial (varia conforme a versão
 # publicada). O importador usa o primeiro nome da lista que encontrar no
@@ -468,111 +479,150 @@ _UPSERT_CA_CACHE_SQL = """
 _TAMANHO_LOTE = 500
 
 
-def sincronizar_base_ca():
-    """Baixa a base oficial, interpreta e grava em ca_cache. Retorna (ok, mensagem, total).
+def _processar_arquivo_local(caminho_arquivo, nome_arquivo, origem):
+    """Processa um arquivo já salvo em disco e grava os registros em ca_cache.
 
-    Processa o arquivo em streaming (linha a linha, gravando em lotes) em vez
-    de carregar tudo em memória de uma vez — a base oficial tem centenas de
-    milhares de linhas, e o plano gratuito do Render só tem 512MB de RAM.
+    Usada tanto pela sincronização automática (arquivo baixado do gov.br)
+    quanto pela importação manual (arquivo enviado por um administrador pela
+    tela de sincronização) — a partir daqui o processamento é idêntico nos
+    dois casos. Detecta sozinha se o arquivo é um zip (assinatura "PK") ou o
+    arquivo de dados puro, extraindo se preciso — tudo em disco, nunca
+    carregando o conteúdo inteiro na memória de uma vez (a base oficial tem
+    quase 100MB e mais de 96 mil linhas; carregá-la inteira já chegou a usar
+    mais de 700MB de memória em teste local, o que estouraria os 512MB do
+    plano gratuito do Render).
+
+    `origem` é só um rótulo (por exemplo "Sincronização automática" ou
+    "Importação manual") usado para diferenciar a entrada no histórico
+    (sync_log). Grava o resultado (sucesso ou erro) em sync_log antes de
+    retornar (ok, mensagem, total).
     """
     try:
-        with tempfile.TemporaryDirectory(prefix="caepi-") as pasta_temp:
-            caminho_baixado = os.path.join(pasta_temp, "baixado")
-            tipo = _baixar_arquivo_base(caminho_baixado)
-            # O site já serviu esse link tanto compactado (zip) quanto como o
-            # arquivo de dados puro (sem compactação nenhuma) — só
-            # descompacta se o que veio realmente for um zip. Tudo em disco,
-            # nunca o conteúdo inteiro na memória de uma vez (ver docstrings
-            # acima).
-            if tipo == "zip":
-                caminho_dados = os.path.join(pasta_temp, "dados")
-                nome_arquivo = _extrair_zip_para_arquivo(caminho_baixado, caminho_dados)
-            else:
-                caminho_dados = caminho_baixado
-                nome_arquivo = "download direto (sem compactação)"
+        with open(caminho_arquivo, "rb") as f:
+            inicio_bytes = f.read(4)
 
-            leitor, arquivo_aberto = _abrir_leitor_ca(caminho_dados, nome_arquivo)
-            try:
-                mapa = _mapear_colunas(leitor.fieldnames)
+        if inicio_bytes[:2] == b"PK":
+            pasta = os.path.dirname(os.path.abspath(caminho_arquivo)) or "."
+            caminho_dados = os.path.join(pasta, "dados_extraidos")
+            nome_arquivo = _extrair_zip_para_arquivo(caminho_arquivo, caminho_dados)
+        else:
+            caminho_dados = caminho_arquivo
 
-                if "numero_ca" not in mapa:
-                    raise RuntimeError(
-                        "Não encontrei a coluna do número do CA no arquivo baixado. "
-                        f"Colunas encontradas no cabeçalho detectado: {leitor.fieldnames!r}. "
-                        "O layout oficial pode ter mudado — ajuste COLUNAS_CANDIDATAS em app/ca_sync.py."
-                    )
+        leitor, arquivo_aberto = _abrir_leitor_ca(caminho_dados, nome_arquivo)
+        try:
+            mapa = _mapear_colunas(leitor.fieldnames)
 
-                db = get_db()
-                colunas_sql = "(" + ", ".join(_COLUNAS_CA_CACHE) + ")"
-                agora = datetime.now().isoformat(timespec="seconds")
-                total = 0
-                # Dict só com as linhas do lote atual (no máximo
-                # _TAMANHO_LOTE de cada vez) — se o mesmo CA aparecer duas
-                # vezes dentro do MESMO lote, mantemos a última (o Postgres
-                # não permite que um único INSERT atualize a mesma linha
-                # duas vezes via ON CONFLICT). Repetições em lotes
-                # diferentes não têm problema: o lote mais recente
-                # simplesmente sobrescreve o valor gravado pelo lote
-                # anterior.
-                lote = {}
-
-                def _gravar_lote():
-                    nonlocal total
-                    if not lote:
-                        return
-                    valores = list(lote.values())
-                    marcadores = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(valores))
-                    args_lote = [valor for linha in valores for valor in linha]
-                    db.execute(
-                        f"INSERT INTO ca_cache {colunas_sql} VALUES {marcadores} {_UPSERT_CA_CACHE_SQL}",
-                        args_lote,
-                    )
-                    # Confirma a cada lote em vez de só no final: se algo
-                    # der errado no meio (timeout, queda de conexão), o que
-                    # já foi processado não se perde e a próxima
-                    # sincronização continua de onde parou.
-                    db.commit()
-                    total += len(valores)
-                    lote.clear()
-
-                for row in leitor:
-                    numero_ca = (row.get(mapa.get("numero_ca")) or "").strip()
-                    if not numero_ca or numero_ca.lower() == "nan":
-                        continue
-                    lote[numero_ca] = (
-                        numero_ca,
-                        (row.get(mapa.get("situacao")) or "").strip(),
-                        _normalizar_data(row.get(mapa.get("validade"))),
-                        (row.get(mapa.get("fabricante_cnpj")) or "").strip(),
-                        (row.get(mapa.get("fabricante_nome")) or "").strip(),
-                        (row.get(mapa.get("equipamento_nome")) or "").strip(),
-                        (row.get(mapa.get("descricao")) or "").strip(),
-                        agora,
-                    )
-                    if len(lote) >= _TAMANHO_LOTE:
-                        _gravar_lote()
-                _gravar_lote()  # o restante (lote incompleto no final do arquivo)
-
-                db.execute(
-                    "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
-                    ("sucesso", total, f"{total} certificados importados/atualizados."),
+            if "numero_ca" not in mapa:
+                raise RuntimeError(
+                    "Não encontrei a coluna do número do CA no arquivo. "
+                    f"Colunas encontradas no cabeçalho detectado: {leitor.fieldnames!r}. "
+                    "O layout oficial pode ter mudado — ajuste COLUNAS_CANDIDATAS em app/ca_sync.py."
                 )
+
+            db = get_db()
+            colunas_sql = "(" + ", ".join(_COLUNAS_CA_CACHE) + ")"
+            agora = datetime.now().isoformat(timespec="seconds")
+            total = 0
+            # Dict só com as linhas do lote atual (no máximo
+            # _TAMANHO_LOTE de cada vez) — se o mesmo CA aparecer duas
+            # vezes dentro do MESMO lote, mantemos a última (o Postgres
+            # não permite que um único INSERT atualize a mesma linha
+            # duas vezes via ON CONFLICT). Repetições em lotes
+            # diferentes não têm problema: o lote mais recente
+            # simplesmente sobrescreve o valor gravado pelo lote
+            # anterior.
+            lote = {}
+
+            def _gravar_lote():
+                nonlocal total
+                if not lote:
+                    return
+                valores = list(lote.values())
+                marcadores = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(valores))
+                args_lote = [valor for linha in valores for valor in linha]
+                db.execute(
+                    f"INSERT INTO ca_cache {colunas_sql} VALUES {marcadores} {_UPSERT_CA_CACHE_SQL}",
+                    args_lote,
+                )
+                # Confirma a cada lote em vez de só no final: se algo
+                # der errado no meio (timeout, queda de conexão), o que
+                # já foi processado não se perde e a próxima
+                # sincronização continua de onde parou.
                 db.commit()
-            finally:
-                # Fecha o arquivo aberto ANTES de sair do bloco `with` acima
-                # (que apaga a pasta temporária) — evita depender da coleta
-                # de lixo pra liberar o descritor de arquivo.
-                arquivo_aberto.close()
+                total += len(valores)
+                lote.clear()
+
+            for row in leitor:
+                numero_ca = (row.get(mapa.get("numero_ca")) or "").strip()
+                if not numero_ca or numero_ca.lower() == "nan":
+                    continue
+                lote[numero_ca] = (
+                    numero_ca,
+                    (row.get(mapa.get("situacao")) or "").strip(),
+                    _normalizar_data(row.get(mapa.get("validade"))),
+                    (row.get(mapa.get("fabricante_cnpj")) or "").strip(),
+                    (row.get(mapa.get("fabricante_nome")) or "").strip(),
+                    (row.get(mapa.get("equipamento_nome")) or "").strip(),
+                    (row.get(mapa.get("descricao")) or "").strip(),
+                    agora,
+                )
+                if len(lote) >= _TAMANHO_LOTE:
+                    _gravar_lote()
+            _gravar_lote()  # o restante (lote incompleto no final do arquivo)
+
+            db.execute(
+                "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
+                ("sucesso", total, f"{origem}: {total} certificados importados/atualizados."),
+            )
+            db.commit()
+        finally:
+            # Fecha o arquivo aberto ANTES de a pasta temporária do chamador
+            # ser apagada — evita depender da coleta de lixo pra liberar o
+            # descritor de arquivo.
+            arquivo_aberto.close()
 
         return True, f"{total} certificados sincronizados com sucesso.", total
     except Exception as e:  # noqa: BLE001
         db = get_db()
         db.execute(
             "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
-            ("erro", 0, str(e)),
+            ("erro", 0, f"{origem}: {e}"),
         )
         db.commit()
         return False, str(e), 0
+
+
+def sincronizar_base_ca():
+    """Baixa a base oficial do gov.br, interpreta e grava em ca_cache.
+    Retorna (ok, mensagem, total).
+    """
+    with tempfile.TemporaryDirectory(prefix="caepi-") as pasta_temp:
+        caminho_baixado = os.path.join(pasta_temp, "baixado")
+        try:
+            _baixar_arquivo_base(caminho_baixado)
+        except Exception as e:  # noqa: BLE001
+            db = get_db()
+            db.execute(
+                "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
+                ("erro", 0, f"Sincronização automática: {e}"),
+            )
+            db.commit()
+            return False, str(e), 0
+
+        return _processar_arquivo_local(
+            caminho_baixado, "arquivo baixado do gov.br", origem="Sincronização automática"
+        )
+
+
+def importar_arquivo_ca(caminho_arquivo, nome_arquivo):
+    """Importa manualmente um arquivo já salvo em disco — enviado por um
+    administrador pela tela de sincronização, depois de baixado à mão em
+    URL_CONSULTA_CA. Mesmo processamento da sincronização automática, só que
+    a partir de um arquivo que o próprio usuário baixou do site oficial pelo
+    navegador (evitando o limite de tamanho de resposta que o site parece
+    aplicar a downloads automatizados — ver comentário em URL_CONSULTA_CA).
+    """
+    return _processar_arquivo_local(caminho_arquivo, nome_arquivo, origem="Importação manual")
 
 
 def buscar_ca(numero_ca):
@@ -661,6 +711,18 @@ from .auth import roles_required
 bp = Blueprint("ca_sync", __name__, url_prefix="/ca")
 
 
+@bp.before_request
+def _permitir_upload_grande():
+    # O sistema inteiro usa um limite padrão de 15MB por upload
+    # (MAX_CONTENT_LENGTH, em app/__init__.py) — pensado para uploads
+    # normais (foto de colaborador, logotipo). O relatório oficial do CAEPI
+    # baixado manualmente pode passar de 150MB, então relaxamos esse limite
+    # só para a rota de importação manual (request.max_content_length
+    # sobrescreve o valor padrão só para esta requisição).
+    if request.endpoint == "ca_sync.importar":
+        request.max_content_length = 300 * 1024 * 1024  # 300 MB
+
+
 @bp.route("/buscar")
 @roles_required("admin", "almoxarife")
 def buscar():
@@ -694,12 +756,60 @@ def sincronizar():
     return redirect(request.referrer or url_for("epis.listar"))
 
 
+@bp.route("/importar", methods=["POST"])
+@roles_required("admin")
+def importar():
+    from flask import current_app
+
+    arquivo = request.files.get("arquivo")
+    if not arquivo or not arquivo.filename:
+        flash("Selecione o arquivo que você baixou do site do CAEPI para importar.", "erro")
+        return redirect(request.referrer or url_for("ca_sync.status"))
+
+    pasta_temp = tempfile.mkdtemp(prefix="caepi-import-")
+    caminho_salvo = os.path.join(pasta_temp, "importado")
+    # .save() grava direto em disco em pedaços, sem carregar o arquivo
+    # inteiro na memória — importante porque esse arquivo pode passar de
+    # 150MB (ver _permitir_upload_grande acima).
+    arquivo.save(caminho_salvo)
+    nome_original = arquivo.filename
+
+    execute_db(
+        "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
+        ("em_andamento", None, f'Importação manual do arquivo "{nome_original}" iniciada em segundo plano.'),
+    )
+
+    app_obj = current_app._get_current_object()
+
+    import threading
+
+    def _tarefa():
+        with app_obj.app_context():
+            try:
+                importar_arquivo_ca(caminho_salvo, nome_original)
+            finally:
+                # Limpa a pasta temporária (arquivo enviado + zip extraído,
+                # se houver) depois de processar, com sucesso ou erro.
+                shutil.rmtree(pasta_temp, ignore_errors=True)
+
+    threading.Thread(target=_tarefa, daemon=True, name="import-ca").start()
+
+    flash(
+        "Importação iniciada em segundo plano — pode levar um ou dois minutos, dependendo do "
+        "tamanho do arquivo. Atualize esta página daqui a pouco para ver o resultado no histórico abaixo.",
+        "sucesso",
+    )
+    return redirect(request.referrer or url_for("ca_sync.status"))
+
+
 @bp.route("/status")
 @roles_required("admin")
 def status():
     logs = query_db("SELECT * FROM sync_log ORDER BY id DESC LIMIT 20")
     total_ca = query_db("SELECT COUNT(*) AS c FROM ca_cache", one=True)["c"]
-    return render_template("admin/ca_status.html", logs=logs, total_ca=total_ca)
+    return render_template(
+        "admin/ca_status.html", logs=logs, total_ca=total_ca, url_consulta_ca=URL_CONSULTA_CA
+    )
 
 
 # --- CLI ---------------------------------------------------------------
