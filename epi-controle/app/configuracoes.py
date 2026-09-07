@@ -1,12 +1,13 @@
-import uuid
-from pathlib import Path
+from datetime import datetime
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from .auth import roles_required
-from .db import get_db, query_db, execute_db
+from .db import get_db, query_db, execute_db, salvar_arquivo
 
 bp = Blueprint("configuracoes", __name__, url_prefix="/configuracoes")
+
+_MIME_POR_EXTENSAO = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
 
 
 def _config():
@@ -26,21 +27,20 @@ def editar():
         empresa_nome = request.form.get("empresa_nome", "").strip()
         responsavel_sesmt = request.form.get("responsavel_sesmt", "").strip()
 
-        logo_path = cfg["logo_path"]
+        logo_arquivo_id = cfg["logo_arquivo_id"]
         arquivo = request.files.get("logo")
         if arquivo and arquivo.filename:
             ext = arquivo.filename.rsplit(".", 1)[-1].lower()
-            if ext in {"png", "jpg", "jpeg", "webp"}:
-                nome = f"logo/{uuid.uuid4().hex}.{ext}"
-                arquivo.save(Path(current_app.config["UPLOAD_FOLDER"]) / nome)
-                logo_path = nome
+            if ext in _MIME_POR_EXTENSAO:
+                logo_arquivo_id = salvar_arquivo(arquivo.read(), _MIME_POR_EXTENSAO[ext])
             else:
                 flash("Logo precisa ser PNG, JPG ou WEBP.", "erro")
 
         execute_db(
-            """UPDATE configuracoes SET empresa_nome=?, responsavel_sesmt=?, logo_path=?,
-                                          atualizado_em=datetime('now') WHERE id=1""",
-            (empresa_nome, responsavel_sesmt, logo_path),
+            """UPDATE configuracoes SET empresa_nome=?, responsavel_sesmt=?, logo_arquivo_id=?,
+                                          atualizado_em=? WHERE id=1""",
+            (empresa_nome, responsavel_sesmt, logo_arquivo_id,
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         )
         flash("Configuração salva.", "sucesso")
         return redirect(url_for("configuracoes.editar"))
