@@ -3,7 +3,7 @@ import secrets
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash
 
-from .auth import roles_required
+from .auth import roles_required, get_current_user
 from .db import query_db, execute_db, get_db
 
 bp = Blueprint("colaboradores", __name__, url_prefix="/colaboradores")
@@ -66,9 +66,28 @@ def alterar_papel(usuario_id):
 @roles_required("admin")
 def alternar_status(usuario_id):
     usuario = query_db("SELECT * FROM usuarios WHERE id = ?", (usuario_id,), one=True)
-    if usuario:
-        execute_db("UPDATE usuarios SET ativo = ? WHERE id = ?", (0 if usuario["ativo"] else 1, usuario_id))
-        flash("Situação do colaborador atualizada.", "sucesso")
+    if usuario is None:
+        flash("Colaborador não encontrado.", "erro")
+        return redirect(url_for("colaboradores.listar"))
+
+    atual = get_current_user()
+    if atual and usuario["id"] == atual["id"]:
+        # Evita que um administrador se desative por engano e fique trancado
+        # para fora do próprio sistema.
+        flash("Você não pode desativar o seu próprio acesso. Peça para outro administrador fazer isso.", "erro")
+        return redirect(url_for("colaboradores.listar"))
+
+    if usuario["ativo"] and usuario["papel"] == "admin":
+        outros_admins_ativos = query_db(
+            "SELECT COUNT(*) AS c FROM usuarios WHERE papel = 'admin' AND ativo = 1 AND id != ?",
+            (usuario_id,), one=True,
+        )["c"]
+        if outros_admins_ativos == 0:
+            flash("Não é possível desativar o único administrador ativo do sistema.", "erro")
+            return redirect(url_for("colaboradores.listar"))
+
+    execute_db("UPDATE usuarios SET ativo = ? WHERE id = ?", (0 if usuario["ativo"] else 1, usuario_id))
+    flash("Situação do colaborador atualizada.", "sucesso")
     return redirect(url_for("colaboradores.listar"))
 
 
