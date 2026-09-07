@@ -239,6 +239,13 @@ def _detectar_dialeto(amostra_bytes):
     # usados abaixo para achar o cabeçalho por conteúdo, não só por contagem
     # de separadores.
     candidatos_conhecidos = {c for lista in COLUNAS_CANDIDATAS.values() for c in lista}
+    # A coluna do número do CA é obrigatória (é a chave primária da tabela
+    # local) — exigir que ELA especificamente apareça entre os acertos, além
+    # de um mínimo maior de acertos no total, reduz bastante o risco de uma
+    # linha de descrição em português livre (que pode ter palavras soltas
+    # como "CNPJ" ou "situação" no meio do texto) ser confundida com o
+    # cabeçalho de verdade só por coincidência.
+    candidatos_numero_ca = set(COLUNAS_CANDIDATAS["numero_ca"])
 
     for encoding in ("latin-1", "utf-8", "cp1252"):
         try:
@@ -265,7 +272,8 @@ def _detectar_dialeto(amostra_bytes):
                 if len(partes) < 5:
                     continue
                 normalizadas = {_normaliza(p) for p in partes}
-                if len(normalizadas & candidatos_conhecidos) >= 2:
+                acertos = normalizadas & candidatos_conhecidos
+                if len(acertos) >= 3 and (acertos & candidatos_numero_ca):
                     return encoding, sep, indice_original
 
         # 2) Vazio: se nada bateu com um nome de coluna conhecido (layout
@@ -417,6 +425,7 @@ def sincronizar_base_ca():
                 if "numero_ca" not in mapa:
                     raise RuntimeError(
                         "Não encontrei a coluna do número do CA no arquivo baixado. "
+                        f"Colunas encontradas no cabeçalho detectado: {leitor.fieldnames!r}. "
                         "O layout oficial pode ter mudado — ajuste COLUNAS_CANDIDATAS em app/ca_sync.py."
                     )
 
