@@ -66,8 +66,8 @@
 
       <label for="foto">Foto do EPI</label>
       <input type="file" id="foto" name="foto" accept="image/*">
-      {% if epi and epi.foto_path %}
-        <img src="{{ url_for('uploads', subpath=epi.foto_path) }}" alt="" style="width:80px;margin-top:8px;border-radius:8px">
+      {% if epi and epi.foto_arquivo_id %}
+        <img src="{{ url_for('arquivo', arquivo_id=epi.foto_arquivo_id) }}" alt="" style="width:80px;margin-top:8px;border-radius:8px">
       {% endif %}
 
       <button class="botao" type="submit">Salvar EPI</button>
