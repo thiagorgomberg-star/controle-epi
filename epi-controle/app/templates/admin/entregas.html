@@ -64,7 +64,7 @@
     {% else %}
       <div class="tabela-scroll">
         <table>
-          <thead><tr><th>Colaborador</th><th>EPI</th><th>Entrega</th><th>Troca</th><th>CA</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Colaborador</th><th>EPI</th><th>Entrega</th><th>Troca</th><th>CA</th><th>Status</th><th>Almoxarifado</th><th></th></tr></thead>
           <tbody>
             {% for en in entregas %}
               <tr>
@@ -76,8 +76,28 @@
                 <td>
                   {% if en.status == 'aceito' %}
                     <span class="selo verde">Aceito {{ en.aceito_em[:10] if en.aceito_em else '' }}</span>
+                  {% elif en.status == 'recusado' %}
+                    <span class="selo vermelho">Recusado</span>
+                  {% elif en.status == 'pronto_retirada' %}
+                    <span class="selo azul">Pronto p/ retirada</span>
+                  {% elif en.status == 'em_compra' %}
+                    <span class="selo laranja">Em compra</span>
                   {% else %}
-                    <span class="selo laranja">Pendente</span>
+                    <span class="selo cinza">Em separação</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if en.status in ('em_separacao', 'em_compra', 'pronto_retirada') %}
+                    <form method="post" action="{{ url_for('entregas.atualizar_status', entrega_id=en.id) }}" style="display:flex;gap:6px">
+                      <select name="novo_status" style="width:auto;padding:6px 8px">
+                        <option value="em_separacao" {{ 'selected' if en.status == 'em_separacao' }}>Em separação</option>
+                        <option value="em_compra" {{ 'selected' if en.status == 'em_compra' }}>Em compra</option>
+                        <option value="pronto_retirada" {{ 'selected' if en.status == 'pronto_retirada' }}>Pronto p/ retirada</option>
+                      </select>
+                      <button class="botao secundario pequeno" type="submit">Atualizar</button>
+                    </form>
+                  {% else %}
+                    —
                   {% endif %}
                 </td>
                 <td>
