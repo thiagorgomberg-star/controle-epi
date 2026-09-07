@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block titulo %}Solicitações | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Solicitações de troca/reposição</h1>
+  <p class="subtitulo">Pedidos feitos pelos colaboradores. Ao aprovar, vira uma entrega normal e segue para o almoxarifado separar.</p>
+
+  <div class="cartao">
+    <h2>Aguardando aprovação</h2>
+    {% if not pendentes %}
+      <p class="vazio">Nenhuma solicitação pendente no momento.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr><th>Colaborador</th><th>EPI</th><th>Tipo</th><th>Qtd.</th><th>Motivo</th><th>Saldo</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for s in pendentes %}
+              <tr>
+                <td>{{ s.colaborador_nome }}<br><span style="color:var(--cinza-600);font-size:0.8rem">{{ s.colaborador_matricula or '' }}</span></td>
+                <td>{{ s.epi_nome }} — tam. {{ s.tamanho }}</td>
+                <td><span class="selo {{ 'azul' if s.tipo == 'troca' else 'laranja' }}">{{ 'Troca' if s.tipo == 'troca' else 'Reposição' }}</span></td>
+                <td>{{ s.quantidade }}</td>
+                <td>{{ s.motivo or '—' }}</td>
+                <td>{{ s.estoque_atual }}</td>
+                <td style="white-space:nowrap">
+                  <button class="botao pequeno" type="submit" form="sol-aprovar-{{ s.id }}">Aprovar</button>
+                  <button class="botao secundario pequeno" type="submit" form="sol-recusar-{{ s.id }}">Recusar</button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="cartao">
+    <h2>Histórico de decisões</h2>
+    {% if not historico %}
+      <p class="vazio">Nenhuma solicitação decidida ainda.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr><th>Colaborador</th><th>EPI</th><th>Tipo</th><th>Status</th><th>Decidido por</th><th>Quando</th></tr>
+          </thead>
+          <tbody>
+            {% for s in historico %}
+              <tr>
+                <td>{{ s.colaborador_nome }}</td>
+                <td>{{ s.epi_nome }} — tam. {{ s.tamanho }}</td>
+                <td>{{ 'Troca' if s.tipo == 'troca' else 'Reposição' }}</td>
+                <td>
+                  {% if s.status == 'aprovada' %}<span class="selo verde">Aprovada</span>
+                  {% elif s.status == 'recusada' %}<span class="selo vermelho">Recusada</span>
+                  {% else %}<span class="selo cinza">Cancelada</span>{% endif %}
+                </td>
+                <td>{{ s.aprovado_por_nome or '—' }}</td>
+                <td>{{ s.aprovado_em[:16] if s.aprovado_em else '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+
+  {# Cada linha pendente referencia um form próprio (fora de qualquer outro
+     form da página) pelo atributo form="..." dos botões acima — evita
+     aninhar <form> dentro de <form>, que é HTML inválido. #}
+  {% for s in pendentes %}
+    <form id="sol-aprovar-{{ s.id }}" method="post" hidden
+          action="{{ url_for('solicitacoes.aprovar', solicitacao_id=s.id) }}"
+          data-confirmar="Aprovar a solicitação de {{ s.colaborador_nome }} ({{ s.epi_nome }} — tam. {{ s.tamanho }})? Isso já debita {{ s.quantidade }} unidade(s) do estoque e envia para o almoxarifado separar."></form>
+    <form id="sol-recusar-{{ s.id }}" method="post" hidden
+          action="{{ url_for('solicitacoes.recusar', solicitacao_id=s.id) }}"
+          data-confirmar="Recusar a solicitação de {{ s.colaborador_nome }} ({{ s.epi_nome }} — tam. {{ s.tamanho }})?"></form>
+  {% endfor %}
+</main>
+{% endblock %}
+
