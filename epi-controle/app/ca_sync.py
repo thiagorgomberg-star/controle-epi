@@ -58,6 +58,20 @@ def _mapear_colunas(colunas):
     return mapeamento
 
 
+# Muitos sites de governo (atrás de WAF/CDN) bloqueiam ou devolvem uma página
+# de erro/"acesso negado" (com HTTP 200!) quando o pedido não parece vir de um
+# navegador de verdade — o User-Agent padrão da lib requests ("python-requests/…")
+# costuma ser filtrado. Por isso simulamos um navegador comum aqui.
+_HEADERS_NAVEGADOR = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/zip, application/octet-stream, */*",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+}
+
+
 def _baixar_zip_bytes():
     ultimo_erro = None
     for url in (URL_ZIP, URL_ZIP_FTP):
@@ -72,9 +86,20 @@ def _baixar_zip_bytes():
                     ftp.retrbinary(f"RETR {u.path}", buf.write)
                 return buf.getvalue()
             else:
-                resp = requests.get(url, timeout=20)
+                resp = requests.get(url, timeout=30, headers=_HEADERS_NAVEGADOR, allow_redirects=True)
                 resp.raise_for_status()
-                return resp.content
+                conteudo = resp.content
+                # Um zip de verdade começa com "PK". Se não começar, o site quase
+                # sempre devolveu uma página de bloqueio/erro em vez do arquivo —
+                # detectamos isso aqui para não mascarar o motivo real do erro.
+                if not conteudo[:2] == b"PK":
+                    tipo = resp.headers.get("Content-Type", "desconhecido")
+                    trecho = conteudo[:200].decode("utf-8", errors="replace").replace("\n", " ").strip()
+                    raise RuntimeError(
+                        f"O site devolveu HTTP {resp.status_code} mas o conteúdo não é um "
+                        f"arquivo zip (Content-Type: {tipo}). Início do conteúdo: {trecho!r}"
+                    )
+                return conteudo
         except Exception as e:  # noqa: BLE001
             ultimo_erro = e
             continue
@@ -119,6 +144,30 @@ def _normalizar_data(texto):
     return texto
 
 
+_COLUNAS_CA_CACHE = (
+    "numero_ca", "situacao", "validade", "fabricante_cnpj",
+    "fabricante_nome", "equipamento_nome", "descricao", "atualizado_em",
+)
+
+_UPSERT_CA_CACHE_SQL = """
+    ON CONFLICT(numero_ca) DO UPDATE SET
+        situacao=excluded.situacao,
+        validade=excluded.validade,
+        fabricante_cnpj=excluded.fabricante_cnpj,
+        fabricante_nome=excluded.fabricante_nome,
+        equipamento_nome=excluded.equipamento_nome,
+        descricao=excluded.descricao,
+        atualizado_em=excluded.atualizado_em
+"""
+
+# O banco (Neon/PostgreSQL) fica em outra região/continente do servidor
+# (Render nos EUA, banco no Brasil), então cada ida-e-volta de rede custa uns
+# 150-300ms. Gravar linha por linha (uma consulta por CA) levaria dezenas de
+# minutos com a base oficial toda — inserimos em lotes grandes para reduzir
+# drasticamente o número de idas-e-voltas.
+_TAMANHO_LOTE = 500
+
+
 def sincronizar_base_ca():
     """Baixa a base oficial, interpreta e grava em ca_cache. Retorna (ok, mensagem, total)."""
     try:
@@ -132,39 +181,44 @@ def sincronizar_base_ca():
                 "O layout oficial pode ter mudado — ajuste COLUNAS_CANDIDATAS em app/ca_sync.py."
             )
 
-        db = get_db()
-        total = 0
         agora = datetime.now().isoformat(timespec="seconds")
+        # Usamos um dict (numero_ca -> linha) em vez de gravar direto: se o
+        # arquivo oficial repetir o mesmo CA em mais de uma linha, mantemos
+        # só a última — e evitamos que um único INSERT tente atualizar a
+        # mesma linha duas vezes (o Postgres não permite isso em ON CONFLICT).
+        registros = {}
         for _, row in df.iterrows():
             numero_ca = str(row.get(mapa.get("numero_ca"), "")).strip()
             if not numero_ca or numero_ca.lower() == "nan":
                 continue
-            db.execute(
-                """INSERT INTO ca_cache
-                       (numero_ca, situacao, validade, fabricante_cnpj, fabricante_nome,
-                        equipamento_nome, descricao, atualizado_em)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(numero_ca) DO UPDATE SET
-                       situacao=excluded.situacao,
-                       validade=excluded.validade,
-                       fabricante_cnpj=excluded.fabricante_cnpj,
-                       fabricante_nome=excluded.fabricante_nome,
-                       equipamento_nome=excluded.equipamento_nome,
-                       descricao=excluded.descricao,
-                       atualizado_em=excluded.atualizado_em""",
-                (
-                    numero_ca,
-                    str(row.get(mapa.get("situacao"), "") or ""),
-                    _normalizar_data(row.get(mapa.get("validade"), "")),
-                    str(row.get(mapa.get("fabricante_cnpj"), "") or ""),
-                    str(row.get(mapa.get("fabricante_nome"), "") or ""),
-                    str(row.get(mapa.get("equipamento_nome"), "") or ""),
-                    str(row.get(mapa.get("descricao"), "") or ""),
-                    agora,
-                ),
+            registros[numero_ca] = (
+                numero_ca,
+                str(row.get(mapa.get("situacao"), "") or ""),
+                _normalizar_data(row.get(mapa.get("validade"), "")),
+                str(row.get(mapa.get("fabricante_cnpj"), "") or ""),
+                str(row.get(mapa.get("fabricante_nome"), "") or ""),
+                str(row.get(mapa.get("equipamento_nome"), "") or ""),
+                str(row.get(mapa.get("descricao"), "") or ""),
+                agora,
             )
-            total += 1
-        db.commit()
+
+        valores = list(registros.values())
+        total = len(valores)
+
+        db = get_db()
+        colunas_sql = "(" + ", ".join(_COLUNAS_CA_CACHE) + ")"
+        for inicio in range(0, total, _TAMANHO_LOTE):
+            lote = valores[inicio:inicio + _TAMANHO_LOTE]
+            marcadores = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(lote))
+            args_lote = [valor for linha in lote for valor in linha]
+            db.execute(
+                f"INSERT INTO ca_cache {colunas_sql} VALUES {marcadores} {_UPSERT_CA_CACHE_SQL}",
+                args_lote,
+            )
+            # Confirma a cada lote em vez de só no final: se algo der errado
+            # no meio (timeout, queda de conexão), o que já foi processado
+            # não se perde e a próxima sincronização continua de onde parou.
+            db.commit()
         db.execute(
             "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
             ("sucesso", total, f"{total} certificados importados/atualizados."),
