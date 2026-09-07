@@ -21,6 +21,7 @@ do arquivo baixado (rode `flask --app app inspecionar-ca <arquivo>` para ver
 as colunas encontradas).
 """
 import csv
+import gzip
 import os
 import tempfile
 import zipfile
@@ -40,7 +41,7 @@ URL_ZIP_FTP = "ftp://ftp.mtps.gov.br/portal/fiscalizacao/seguranca-e-saude-no-tr
 COLUNAS_CANDIDATAS = {
     "numero_ca": ["nrregistrocaepi", "nrregistroca", "nrca", "numeroca", "registrocaepi", "ca"],
     "situacao": ["dscsituacaoregistrocaepi", "situacao", "dscsituacao"],
-    "validade": ["dtvalidade", "datavalidade", "dtvalidadecaepi"],
+    "validade": ["dtvalidade", "datavalidade", "dtvalidadecaepi", "datadevalidade"],
     "fabricante_cnpj": ["nrcnpj", "cnpj"],
     "fabricante_nome": ["nomerazaosocialfabricante", "fabricante", "razaosocial"],
     "equipamento_nome": ["nomeequipamento", "equipamento"],
@@ -88,14 +89,22 @@ _HEADERS_NAVEGADOR = {
         "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
     ),
     "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-    # Pede a resposta SEM compressão nenhuma. Uma tentativa anterior recebeu
-    # de volta um bloco de bytes de altíssima entropia (parecendo dados
-    # comprimidos/criptografados, não texto) mesmo sem começar com a
-    # assinatura de zip ("PK") — suspeita forte de Content-Encoding
-    # (gzip/br) não decodificado corretamente em algum ponto do caminho
-    # (proxy, CDN, biblioteca). Pedir "identity" evita essa categoria inteira
-    # de problema, ao custo de um download um pouco maior.
-    "Accept-Encoding": "identity",
+    # Histórico de tentativas com este cabeçalho:
+    #   - Sem fixar nada (deixando a lib negociar): o download completa
+    #     inteiro, mas o conteúdo às vezes chega como um bloco de bytes de
+    #     altíssima entropia (parecendo dados comprimidos/criptografados,
+    #     não texto) — suspeita de Content-Encoding (gzip/br) que não foi
+    #     decodificado automaticamente em algum ponto do caminho.
+    #   - Forçando "identity" (sem compressão nenhuma): o download passou a
+    #     vir consistentemente TRUNCADO por volta de 8MB, bem antes do fim
+    #     do arquivo — pior que o caso acima.
+    # Por isso pedimos "gzip" explicitamente (evitando a ambiguidade do
+    # "br"/brotli) e, por segurança, tratamos manualmente o caso de a
+    # resposta chegar comprimida sem o `requests` descomprimir sozinho (ver
+    # verificação da assinatura gzip 0x1f 0x8b logo abaixo em
+    # _baixar_uma_tentativa) — assim, seja qual for o comportamento real do
+    # servidor, o código consegue lidar com ele.
+    "Accept-Encoding": "gzip",
 }
 
 
@@ -166,6 +175,32 @@ def _baixar_uma_tentativa(destino):
                         f"página HTML (de bloqueio, erro ou captcha), não o arquivo da base. "
                         f"Início do conteúdo: {trecho!r}"
                     )
+
+            # Se a resposta começar com a assinatura gzip (0x1f 0x8b), é
+            # porque o servidor comprimiu o conteúdo e, por algum motivo, a
+            # biblioteca requests não descomprimiu sozinha (aconteceu antes,
+            # nesse mesmo link, quando pedíamos Accept-Encoding: gzip) —
+            # descomprimimos manualmente aqui, escrevendo o resultado em
+            # outro arquivo em disco (sem carregar tudo na memória) e
+            # seguimos a partir dele como se fosse o arquivo baixado.
+            if inicio_bytes[:2] == b"\x1f\x8b":
+                destino_descomprimido = destino + ".gunzip"
+                try:
+                    with gzip.open(destino, "rb") as origem_gz, open(destino_descomprimido, "wb") as saida:
+                        for pedaco in iter(lambda: origem_gz.read(256 * 1024), b""):
+                            saida.write(pedaco)
+                except OSError as e:
+                    raise RuntimeError(
+                        f"Resposta começou com assinatura gzip, mas não foi possível "
+                        f"descomprimir ({e}) — provável download incompleto/corrompido."
+                    )
+                # Sobrescreve o arquivo em `destino` com o conteúdo já
+                # descomprimido — assim quem chamou esta função (que só
+                # conhece o caminho original) continua encontrando o
+                # resultado certo nesse mesmo caminho.
+                os.replace(destino_descomprimido, destino)
+                with open(destino, "rb") as f:
+                    inicio_bytes = f.read(200)
 
             # Um zip de verdade começa com "PK" — só faz sentido validar que
             # abre como zip nesse caso. Se NÃO começar com "PK", tratamos o
@@ -275,7 +310,17 @@ def _detectar_dialeto(amostra_bytes):
     # cabeçalho de verdade só por coincidência.
     candidatos_numero_ca = set(COLUNAS_CANDIDATAS["numero_ca"])
 
-    for encoding in ("latin-1", "utf-8", "cp1252"):
+    # Tentamos "utf-8" ANTES de "latin-1" de propósito: "latin-1" consegue
+    # decodificar QUALQUER sequência de bytes sem erro (é um mapeamento 1
+    # byte = 1 caractere para todo o intervalo 0-255), então se ela viesse
+    # primeiro nunca daríamos chance ao utf-8 — e um arquivo utf-8 de
+    # verdade (por exemplo, um relatório exportado com BOM e acentuação em
+    # utf-8) acabaria decodificado errado (texto virando "mojibake": "ç"
+    # aparecendo como "Ã§", e o BOM confundindo o nome da primeira coluna).
+    # Texto com acentuação em latin-1 de verdade quase sempre tem uma
+    # sequência de bytes que NÃO é utf-8 válido, então tentar utf-8 primeiro
+    # e cair para latin-1 no erro funciona corretamente nos dois casos.
+    for encoding in ("utf-8", "latin-1", "cp1252"):
         try:
             linhas = [linhas_originais[i].decode(encoding) for i in indices_com_conteudo]
         except UnicodeDecodeError:
