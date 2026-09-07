@@ -15,14 +15,16 @@
   {% endif %}
 
   {% for epi in epis %}
-    <div class="cartao" style="display:flex;gap:16px;align-items:center">
+    <div class="cartao" style="display:flex;gap:16px;align-items:center{{ ';opacity:0.55' if not epi.ativo }}">
       {% if epi.foto_arquivo_id %}
         <img src="{{ url_for('arquivo', arquivo_id=epi.foto_arquivo_id) }}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px">
       {% else %}
         <div style="width:64px;height:64px;border-radius:8px;background:var(--cinza-100)"></div>
       {% endif %}
       <div style="flex:1">
-        <strong>{{ epi.nome }}</strong><br>
+        <strong>{{ epi.nome }}</strong>
+        {% if not epi.ativo %}<span class="selo cinza">Removido</span>{% endif %}
+        <br>
         <span style="color:var(--cinza-600);font-size:0.88rem">
           {{ epi.fabricante or '—' }}{% if epi.tamanho %} · Tam. {{ epi.tamanho }}{% endif %}
         </span><br>
@@ -36,10 +38,16 @@
       <div style="display:flex;gap:8px">
         <a class="botao secundario pequeno" href="{{ url_for('epis.editar', epi_id=epi.id) }}">Editar</a>
         {% if current_user and current_user.papel == 'admin' %}
-          <form method="post" action="{{ url_for('epis.desativar', epi_id=epi.id) }}"
-                data-confirmar="Remover {{ epi.nome }} da lista de EPIs cadastrados? O histórico de estoque e entregas é mantido, mas o item deixa de aparecer aqui e no cadastro de novas entregas.">
-            <button class="botao secundario pequeno" type="submit">Remover</button>
-          </form>
+          {% if epi.ativo %}
+            <form method="post" action="{{ url_for('epis.desativar', epi_id=epi.id) }}"
+                  data-confirmar="Remover {{ epi.nome }} da lista de EPIs cadastrados? O histórico de estoque e entregas é mantido, mas o item deixa de aparecer aqui e no cadastro de novas entregas.">
+              <button class="botao secundario pequeno" type="submit">Remover</button>
+            </form>
+          {% else %}
+            <form method="post" action="{{ url_for('epis.reativar', epi_id=epi.id) }}">
+              <button class="botao secundario pequeno" type="submit">Reativar</button>
+            </form>
+          {% endif %}
         {% endif %}
       </div>
     </div>
