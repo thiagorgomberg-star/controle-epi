@@ -16,8 +16,8 @@
 
   {% for epi in epis %}
     <div class="cartao" style="display:flex;gap:16px;align-items:center">
-      {% if epi.foto_path %}
-        <img src="{{ url_for('uploads', subpath=epi.foto_path) }}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px">
+      {% if epi.foto_arquivo_id %}
+        <img src="{{ url_for('arquivo', arquivo_id=epi.foto_arquivo_id) }}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px">
       {% else %}
         <div style="width:64px;height:64px;border-radius:8px;background:var(--cinza-100)"></div>
       {% endif %}
