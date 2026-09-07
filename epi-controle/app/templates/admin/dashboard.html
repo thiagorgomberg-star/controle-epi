@@ -10,6 +10,12 @@
       <div class="numero">{{ aceites_pendentes }}</div>
       <div class="rotulo">Aceites pendentes</div>
     </div>
+    {% if current_user.papel == 'admin' %}
+    <div class="stat {{ 'alerta' if solicitacoes_pendentes > 0 else '' }}">
+      <div class="numero">{{ solicitacoes_pendentes }}</div>
+      <div class="rotulo">Solicitações aguardando aprovação</div>
+    </div>
+    {% endif %}
     <div class="stat {{ 'perigo' if epis_vencidos > 0 else '' }}">
       <div class="numero">{{ epis_vencidos }}</div>
       <div class="rotulo">EPIs com troca vencida</div>
@@ -25,6 +31,12 @@
   </div>
 
   <div class="grid-2">
+    {% if current_user.papel == 'admin' %}
+    <a class="cartao" href="{{ url_for('solicitacoes.listar') }}" style="display:block">
+      <h2>Solicitações de troca/reposição</h2>
+      <p class="subtitulo" style="margin:0">Aprove ou recuse pedidos dos colaboradores.</p>
+    </a>
+    {% endif %}
     <a class="cartao" href="{{ url_for('entregas.listar') }}" style="display:block">
       <h2>Direcionar / acompanhar entregas</h2>
       <p class="subtitulo" style="margin:0">Direcione um EPI a um colaborador e acompanhe os aceites.</p>
