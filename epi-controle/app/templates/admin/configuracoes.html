@@ -13,8 +13,8 @@
       <label for="logo">Logomarca da empresa</label>
       <input type="file" id="logo" name="logo" accept="image/*">
       <p class="campo-ajuda">PNG ou JPG. Aparece no topo dos relatórios de entrega em PDF.</p>
-      {% if cfg.logo_path %}
-        <img src="{{ url_for('uploads', subpath=cfg.logo_path) }}" alt="" style="height:40px;margin-top:6px;border-radius:4px">
+      {% if cfg.logo_arquivo_id %}
+        <img src="{{ url_for('arquivo', arquivo_id=cfg.logo_arquivo_id) }}" alt="" style="height:40px;margin-top:6px;border-radius:4px">
       {% endif %}
       <button class="botao" type="submit">Salvar configuração</button>
     </form>
