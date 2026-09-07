@@ -88,6 +88,14 @@ _HEADERS_NAVEGADOR = {
         "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
     ),
     "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    # Pede a resposta SEM compressão nenhuma. Uma tentativa anterior recebeu
+    # de volta um bloco de bytes de altíssima entropia (parecendo dados
+    # comprimidos/criptografados, não texto) mesmo sem começar com a
+    # assinatura de zip ("PK") — suspeita forte de Content-Encoding
+    # (gzip/br) não decodificado corretamente em algum ponto do caminho
+    # (proxy, CDN, biblioteca). Pedir "identity" evita essa categoria inteira
+    # de problema, ao custo de um download um pouco maior.
+    "Accept-Encoding": "identity",
 }
 
 
@@ -182,6 +190,26 @@ def _baixar_uma_tentativa(destino):
                         f"({e}) — provável download incompleto/truncado ({detalhe})."
                     )
                 return "zip"
+
+            # Não é zip — assumimos que é o arquivo de dados em texto puro
+            # (ver docstring do módulo). Mas se o conteúdo parecer binário de
+            # verdade (muitos bytes de controle, não texto legível), é sinal
+            # de que algo saiu errado no download (por exemplo, uma
+            # compressão que não foi decodificada em algum ponto do caminho)
+            # — melhor falhar aqui com um erro claro do que deixar o parsing
+            # mais adiante confundir isso com um layout de colunas
+            # desconhecido.
+            amostra_controle = inicio_bytes[:100]
+            nao_imprimiveis = sum(
+                1 for b in amostra_controle if b < 9 or 13 < b < 32
+            )
+            if amostra_controle and nao_imprimiveis > len(amostra_controle) * 0.1:
+                raise RuntimeError(
+                    "O conteúdo baixado não parece ser nem um zip nem texto legível "
+                    "(muitos bytes de controle/binários logo no início) — provável "
+                    "compressão não decodificada ou resposta corrompida. Primeiros "
+                    f"bytes (hex): {inicio_bytes[:40].hex()}"
+                )
             return "dados"
         except Exception as e:  # noqa: BLE001
             ultimo_erro = e
