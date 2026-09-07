@@ -14,16 +14,12 @@ def create_app(test_config=None):
 
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-troque-em-producao"),
-        DATABASE=os.environ.get("DATABASE_PATH", str(instance_path / "epi.sqlite3")),
-        UPLOAD_FOLDER=str(instance_path / "uploads"),
+        DATABASE_URL=os.environ.get("DATABASE_URL", ""),
         MAX_CONTENT_LENGTH=15 * 1024 * 1024,  # 15 MB por upload
     )
 
     if test_config:
         app.config.update(test_config)
-
-    for sub in ("fotos", "assinaturas", "epis", "logo"):
-        (Path(app.config["UPLOAD_FOLDER"]) / sub).mkdir(parents=True, exist_ok=True)
 
     db_module.init_app(app)
 
@@ -52,11 +48,20 @@ def create_app(test_config=None):
     app.register_blueprint(configuracoes.bp)
     ca_sync.register_cli(app)
 
-    from flask import send_from_directory
+    import io
+    from flask import abort, send_file
 
-    @app.route("/uploads/<path:subpath>")
-    def uploads(subpath):
-        return send_from_directory(app.config["UPLOAD_FOLDER"], subpath)
+    @app.route("/arquivo/<int:arquivo_id>")
+    def arquivo(arquivo_id):
+        from .db import query_db
+        linha = query_db("SELECT conteudo, content_type FROM arquivos WHERE id = ?", (arquivo_id,), one=True)
+        if linha is None:
+            abort(404)
+        return send_file(
+            io.BytesIO(bytes(linha["conteudo"])),
+            mimetype=linha["content_type"],
+            max_age=86400,
+        )
 
     @app.context_processor
     def inject_globals():
