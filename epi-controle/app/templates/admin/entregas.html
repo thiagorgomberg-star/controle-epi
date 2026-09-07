@@ -19,11 +19,11 @@
           </select>
         </div>
         <div>
-          <label for="epi_id">EPI</label>
-          <select id="epi_id" name="epi_id" required>
-            <option value="">Selecione o equipamento</option>
-            {% for e in epis %}
-              <option value="{{ e.id }}">{{ e.nome }} — CA {{ e.ca_numero or 's/ CA' }} (saldo: {{ e.estoque_atual }})</option>
+          <label for="epi_tamanho_id">EPI / Tamanho</label>
+          <select id="epi_tamanho_id" name="epi_tamanho_id" required>
+            <option value="">Selecione o equipamento e o tamanho</option>
+            {% for t in tamanhos %}
+              <option value="{{ t.id }}">{{ t.nome }} — Tam. {{ t.tamanho }} — CA {{ t.ca_numero or 's/ CA' }} (saldo: {{ t.estoque_atual }})</option>
             {% endfor %}
           </select>
         </div>
@@ -32,10 +32,6 @@
         <div>
           <label for="quantidade">Quantidade</label>
           <input type="number" id="quantidade" name="quantidade" min="1" value="1" required>
-        </div>
-        <div>
-          <label for="tamanho">Tamanho (opcional)</label>
-          <input type="text" id="tamanho" name="tamanho">
         </div>
       </div>
       <div class="linha-campos">
