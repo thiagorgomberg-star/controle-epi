@@ -18,6 +18,7 @@
         <a href="{{ url_for('epis.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('epis.') }}">EPIs</a>
         <a href="{{ url_for('estoque.listar') }}" class="{{ 'ativo' if request.endpoint == 'estoque.listar' }}">Estoque</a>
         {% if current_user.papel == 'admin' %}
+          <a href="{{ url_for('solicitacoes.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('solicitacoes.') }}">Solicitações</a>
           <a href="{{ url_for('colaboradores.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('colaboradores.') }}">Colaboradores</a>
           <a href="{{ url_for('ca_sync.status') }}" class="{{ 'ativo' if request.endpoint == 'ca_sync.status' }}">Base de CA</a>
           <a href="{{ url_for('configuracoes.editar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('configuracoes.') }}">Configuração</a>
