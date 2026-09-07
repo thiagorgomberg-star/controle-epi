@@ -73,7 +73,9 @@ _HEADERS_NAVEGADOR = {
 }
 
 
-def _baixar_zip_bytes():
+def _baixar_uma_tentativa():
+    """Uma rodada tentando cada URL configurada (HTTPS, depois FTP).
+    Devolve os bytes do zip ou levanta o último erro encontrado."""
     ultimo_erro = None
     for url in (URL_ZIP, URL_ZIP_FTP):
         try:
@@ -85,7 +87,7 @@ def _baixar_zip_bytes():
                 with ftplib.FTP(u.hostname, timeout=20) as ftp:
                     ftp.login()
                     ftp.retrbinary(f"RETR {u.path}", buf.write)
-                return buf.getvalue()
+                conteudo = buf.getvalue()
             else:
                 resp = requests.get(url, timeout=30, headers=_HEADERS_NAVEGADOR, allow_redirects=True)
                 resp.raise_for_status()
@@ -100,11 +102,39 @@ def _baixar_zip_bytes():
                         f"O site devolveu HTTP {resp.status_code} mas o conteúdo não é um "
                         f"arquivo zip (Content-Type: {tipo}). Início do conteúdo: {trecho!r}"
                     )
-                return conteudo
+            # O começo "PK" não garante um arquivo íntegro — uma resposta
+            # cortada no meio do download (comum em redes instáveis) também
+            # pode começar com "PK" e mesmo assim não abrir como zip. Testamos
+            # isso aqui, antes de considerar a tentativa bem-sucedida.
+            with zipfile.ZipFile(io.BytesIO(conteudo)):
+                pass
+            return conteudo
         except Exception as e:  # noqa: BLE001
             ultimo_erro = e
             continue
     raise RuntimeError(f"Não foi possível baixar a base do CAEPI: {ultimo_erro}")
+
+
+def _baixar_zip_bytes():
+    """Baixa o zip oficial, tentando de novo algumas vezes.
+
+    Na prática, o download desse arquivo às vezes falha de forma
+    intermitente — a rede cai no meio, ou o site bloqueia uma tentativa e
+    libera a próxima. Tentar mais de uma vez, com uma pequena pausa entre as
+    tentativas, evita que a sincronização inteira falhe por causa de um
+    problema passageiro em vez de um problema real.
+    """
+    import time
+
+    ultimo_erro = None
+    for tentativa in range(3):
+        try:
+            return _baixar_uma_tentativa()
+        except Exception as e:  # noqa: BLE001
+            ultimo_erro = e
+            if tentativa < 2:
+                time.sleep(3)
+    raise RuntimeError(f"{ultimo_erro} (após 3 tentativas)")
 
 
 def _detectar_dialeto(amostra_bytes):
