@@ -107,44 +107,87 @@ def _baixar_zip_bytes():
     raise RuntimeError(f"Não foi possível baixar a base do CAEPI: {ultimo_erro}")
 
 
-def _detectar_dialeto(primeira_linha_bytes):
-    """Descobre o encoding e o separador olhando só a linha de cabeçalho.
+def _detectar_dialeto(amostra_bytes):
+    """Descobre o encoding, o separador e em que linha começa o cabeçalho,
+    olhando uma amostra do começo do arquivo.
 
     Evita usar pandas aqui de propósito: a base oficial tem centenas de
     milhares de linhas, e ler o arquivo inteiro num DataFrame (ainda mais
     com engine="python") usa memória demais para o plano gratuito do Render
     (512MB) — foi exatamente isso que derrubou o processo por falta de
-    memória. Olhar só a primeira linha é suficiente pra descobrir o formato.
+    memória. Olhar só uma amostra do começo é suficiente pra descobrir o
+    formato.
+
+    Olhamos várias linhas (não só a primeira) porque alguns arquivos do
+    governo trazem uma linha de título/metadado antes do cabeçalho de
+    verdade — se olhássemos só a linha 0, essa linha de título (sem vários
+    separadores) faria a detecção falhar mesmo com um arquivo válido.
+
+    Retorna (encoding, separador, índice da linha onde o cabeçalho começa).
     """
+    linhas_originais = amostra_bytes.split(b"\n")
+    indices_com_conteudo = [i for i, l in enumerate(linhas_originais) if l.strip()]
+    if not indices_com_conteudo:
+        raise RuntimeError("Arquivo da base CAEPI veio vazio ou sem linhas.")
+
     for encoding in ("latin-1", "utf-8", "cp1252"):
         try:
-            linha = primeira_linha_bytes.decode(encoding)
+            linhas = [linhas_originais[i].decode(encoding) for i in indices_com_conteudo]
         except UnicodeDecodeError:
             continue
-        for sep in (";", "\t", ","):
-            if linha.count(sep) > 2:
-                return encoding, sep
-    raise RuntimeError("Não foi possível interpretar o formato do arquivo da base CAEPI.")
+        for sep in (";", "\t", ",", "|"):
+            contagens = [linha.count(sep) for linha in linhas]
+            # A linha de cabeçalho de verdade tem várias colunas (bastante
+            # separadores) e as linhas de dados logo depois costumam ter a
+            # MESMA contagem — é assim que a identificamos em meio a
+            # possíveis linhas de título/metadado antes dela.
+            for pos, indice_original in enumerate(indices_com_conteudo):
+                contagem = contagens[pos]
+                if contagem <= 2:
+                    continue
+                seguintes = contagens[pos + 1:pos + 6] or contagens[pos + 1:]
+                if seguintes and sum(1 for c in seguintes if c == contagem) >= max(1, len(seguintes) // 2):
+                    return encoding, sep, indice_original
+
+    primeira = linhas_originais[indices_com_conteudo[0]][:200].decode("latin-1", errors="replace")
+    raise RuntimeError(
+        "Não foi possível interpretar o formato do arquivo da base CAEPI. "
+        f"Primeira linha não vazia: {primeira!r}"
+    )
 
 
 def _extrair_zip(zip_bytes):
-    """Descompacta o zip oficial e devolve os bytes do arquivo de dados."""
+    """Descompacta o zip oficial e devolve (nome, bytes) do arquivo de dados.
+
+    O zip pode conter mais de um arquivo (por exemplo, um "leiame.txt"
+    pequeno junto com o arquivo de dados de verdade) — por isso escolhemos o
+    MAIOR arquivo do zip, e não simplesmente o primeiro da lista. Pegar só o
+    primeiro foi, na prática, o que nos fez extrair um arquivo pequeno
+    (não a base de dados) numa sincronização anterior.
+    """
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-        nomes = [n for n in z.namelist() if not n.endswith("/")]
-        if not nomes:
+        entradas = [info for info in z.infolist() if not info.is_dir() and info.file_size > 0]
+        if not entradas:
             raise RuntimeError("Arquivo zip da base CAEPI veio vazio.")
-        alvo = nomes[0]
-        with z.open(alvo) as f:
-            return f.read()
+        maior = max(entradas, key=lambda info: info.file_size)
+        with z.open(maior) as f:
+            return maior.filename, f.read()
 
 
-def _ler_linhas_ca(conteudo_bytes):
+def _ler_linhas_ca(conteudo_bytes, nome_arquivo="arquivo"):
     """Gera um dict por linha do CSV oficial, sem carregar tudo em memória
     de uma vez (csv.DictReader é um iterador — processa linha a linha)."""
-    primeira_linha = conteudo_bytes.split(b"\n", 1)[0]
-    encoding, sep = _detectar_dialeto(primeira_linha)
-    texto = io.StringIO(conteudo_bytes.decode(encoding, errors="replace"))
-    leitor = csv.DictReader(texto, delimiter=sep)
+    amostra = b"\n".join(conteudo_bytes.split(b"\n")[:40])
+    try:
+        encoding, sep, indice_cabecalho = _detectar_dialeto(amostra)
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"{e} (arquivo extraído do zip: {nome_arquivo!r}, {len(conteudo_bytes)} bytes)"
+        )
+    texto_completo = conteudo_bytes.decode(encoding, errors="replace")
+    linhas = texto_completo.split("\n")
+    texto = "\n".join(linhas[indice_cabecalho:])
+    leitor = csv.DictReader(io.StringIO(texto), delimiter=sep)
     if not leitor.fieldnames:
         raise RuntimeError("Não foi possível interpretar o formato do arquivo da base CAEPI.")
     return leitor
@@ -196,8 +239,8 @@ def sincronizar_base_ca():
     """
     try:
         zip_bytes = _baixar_zip_bytes()
-        conteudo = _extrair_zip(zip_bytes)
-        leitor = _ler_linhas_ca(conteudo)
+        nome_arquivo, conteudo = _extrair_zip(zip_bytes)
+        leitor = _ler_linhas_ca(conteudo, nome_arquivo)
         mapa = _mapear_colunas(leitor.fieldnames)
 
         if "numero_ca" not in mapa:
