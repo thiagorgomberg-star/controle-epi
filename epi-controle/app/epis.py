@@ -31,7 +31,13 @@ def _salvar_foto(arquivo):
 @bp.route("/")
 @roles_required("admin", "almoxarife")
 def listar():
-    epis = query_db("SELECT * FROM epis WHERE ativo = 1 ORDER BY nome")
+    # Administradores também veem os EPIs removidos (inativos), com opção de
+    # reativar caso a remoção tenha sido engano. Almoxarifes veem só os ativos,
+    # que é o que importa no dia a dia de estoque/entregas.
+    if get_current_user()["papel"] == "admin":
+        epis = query_db("SELECT * FROM epis ORDER BY ativo DESC, nome")
+    else:
+        epis = query_db("SELECT * FROM epis WHERE ativo = 1 ORDER BY nome")
     return render_template("admin/epis.html", epis=epis)
 
 
@@ -131,4 +137,12 @@ def editar(epi_id):
 def desativar(epi_id):
     execute_db("UPDATE epis SET ativo = 0 WHERE id = ?", (epi_id,))
     flash("EPI removido da lista de cadastrados.", "sucesso")
+    return redirect(url_for("epis.listar"))
+
+
+@bp.route("/<int:epi_id>/reativar", methods=["POST"])
+@roles_required("admin")
+def reativar(epi_id):
+    execute_db("UPDATE epis SET ativo = 1 WHERE id = ?", (epi_id,))
+    flash("EPI reativado.", "sucesso")
     return redirect(url_for("epis.listar"))
