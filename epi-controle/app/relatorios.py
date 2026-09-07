@@ -1,7 +1,6 @@
 import io
-from pathlib import Path
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, flash, redirect, render_template, request, send_file, url_for
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -28,11 +27,15 @@ def _config():
     return query_db("SELECT * FROM configuracoes WHERE id = 1", one=True)
 
 
-def _caminho_upload(rel_path):
-    if not rel_path:
+def _bytes_arquivo(arquivo_id):
+    """Busca o conteúdo binário (foto/assinatura/logo) salvo no banco e
+    devolve como um objeto de arquivo em memória, pronto para o ReportLab."""
+    if not arquivo_id:
         return None
-    caminho = Path(current_app.config["UPLOAD_FOLDER"]) / rel_path
-    return str(caminho) if caminho.exists() else None
+    linha = query_db("SELECT conteudo FROM arquivos WHERE id = ?", (arquivo_id,), one=True)
+    if linha is None:
+        return None
+    return io.BytesIO(bytes(linha["conteudo"]))
 
 
 def _gerar_pdf_entrega(entrega):
@@ -52,16 +55,16 @@ def _gerar_pdf_entrega(entrega):
     elementos = []
 
     cabecalho = []
-    logo_path = _caminho_upload(config["logo_path"]) if config else None
-    if logo_path:
+    logo_bytes = _bytes_arquivo(config["logo_arquivo_id"]) if config else None
+    if logo_bytes:
         try:
-            cabecalho.append(Image(logo_path, width=30 * mm, height=30 * mm, kind="proportional"))
+            cabecalho.append(Image(logo_bytes, width=30 * mm, height=30 * mm, kind="proportional"))
         except Exception:  # noqa: BLE001
             pass
 
     empresa_nome = (config["empresa_nome"] if config and config["empresa_nome"] else "Controle de EPI")
     texto_cabecalho = [Paragraph(empresa_nome, titulo), Paragraph("Termo de Entrega e Aceite de EPI — NR-6", subtitulo)]
-    if logo_path:
+    if logo_bytes:
         tabela_topo = Table([[cabecalho[0], texto_cabecalho]], colWidths=[35 * mm, None])
         tabela_topo.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
         elementos.append(tabela_topo)
@@ -108,16 +111,16 @@ def _gerar_pdf_entrega(entrega):
     elementos.append(Paragraph(DECLARACAO_NR6, valor))
     elementos.append(Spacer(1, 10))
 
-    assinatura_path = _caminho_upload(entrega["assinatura_path"]) if entrega["assinatura_path"] else None
-    foto_path = _caminho_upload(entrega["foto_path"]) if entrega["foto_path"] else None
+    assinatura_bytes = _bytes_arquivo(entrega["assinatura_arquivo_id"])
+    foto_bytes = _bytes_arquivo(entrega["foto_arquivo_id"])
 
     celulas_evidencia = []
     legendas = []
-    if assinatura_path:
-        celulas_evidencia.append(Image(assinatura_path, width=70 * mm, height=35 * mm, kind="proportional"))
+    if assinatura_bytes:
+        celulas_evidencia.append(Image(assinatura_bytes, width=70 * mm, height=35 * mm, kind="proportional"))
         legendas.append(Paragraph("Assinatura do colaborador", rotulo))
-    if foto_path:
-        celulas_evidencia.append(Image(foto_path, width=40 * mm, height=40 * mm, kind="proportional"))
+    if foto_bytes:
+        celulas_evidencia.append(Image(foto_bytes, width=40 * mm, height=40 * mm, kind="proportional"))
         legendas.append(Paragraph("Foto no momento do aceite", rotulo))
 
     if celulas_evidencia:
@@ -142,7 +145,7 @@ def _buscar_entrega_completa(entrega_id):
         """SELECT en.*, e.nome AS epi_nome, e.descricao AS epi_descricao,
                   u.nome AS colaborador_nome, u.matricula AS colaborador_matricula,
                   u.cargo AS colaborador_cargo, u.setor AS colaborador_setor,
-                  a.assinatura_path, a.foto_path, a.aceito_em
+                  a.assinatura_arquivo_id, a.foto_arquivo_id, a.aceito_em
            FROM entregas en
            JOIN epis e ON e.id = en.epi_id
            JOIN usuarios u ON u.id = en.colaborador_id
