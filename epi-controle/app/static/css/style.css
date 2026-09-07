@@ -287,3 +287,24 @@ tr:last-child td { border-bottom: none; }
 }
 
 .logo-topo { height: 34px; width: auto; border-radius: 4px; }
+.modal-fundo {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 35, 65, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+.modal-fundo[hidden] { display: none; }
+.modal-caixa {
+  background: var(--branco);
+  border-radius: var(--raio);
+  box-shadow: var(--sombra);
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+}
+.modal-caixa p { margin: 0 0 20px; font-size: 0.95rem; color: var(--cinza-900); }
+.modal-botoes { display: flex; justify-content: flex-end; gap: 10px; }
