@@ -33,7 +33,15 @@
           <span class="selo {{ 'vermelho' if epi.estoque_atual <= epi.estoque_minimo else 'verde' }}">{{ epi.estoque_atual }}</span>
         </span>
       </div>
-      <a class="botao secundario pequeno" href="{{ url_for('epis.editar', epi_id=epi.id) }}">Editar</a>
+      <div style="display:flex;gap:8px">
+        <a class="botao secundario pequeno" href="{{ url_for('epis.editar', epi_id=epi.id) }}">Editar</a>
+        {% if current_user and current_user.papel == 'admin' %}
+          <form method="post" action="{{ url_for('epis.desativar', epi_id=epi.id) }}"
+                onsubmit="return confirm('Remover {{ epi.nome }} da lista de EPIs cadastrados? O histórico de estoque e entregas é mantido, mas o item deixa de aparecer aqui e no cadastro de novas entregas.');">
+            <button class="botao secundario pequeno" type="submit">Remover</button>
+          </form>
+        {% endif %}
+      </div>
     </div>
   {% endfor %}
 </main>
