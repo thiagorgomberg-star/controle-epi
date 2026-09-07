@@ -21,6 +21,9 @@
   </div>
 
   {% if pendentes %}
+  <div class="destaque-caixa">
+    Você tem {{ pendentes|length }} item(ns) pronto(s) para retirada no almoxarifado! Assine o aceite abaixo assim que for retirar.
+  </div>
   <div class="cartao">
     <h2>Aguardando seu aceite</h2>
     {% for p in pendentes %}
@@ -32,6 +35,86 @@
         <a class="botao pequeno" href="{{ url_for('entregas.aceitar', entrega_id=p.id) }}">Ver e assinar</a>
       </div>
     {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if em_andamento %}
+  <div class="cartao">
+    <h2>Em andamento no almoxarifado</h2>
+    <p class="campo-ajuda" style="margin-top:-4px">Ainda sendo separado ou comprado. Você será avisado aqui assim que estiver pronto para retirada.</p>
+    {% for p in em_andamento %}
+      <div class="epi-card">
+        <div class="info">
+          <strong>{{ p.epi_nome }}</strong>
+          <span>Qtd. {{ p.quantidade }}{% if p.tamanho %} · tam. {{ p.tamanho }}{% endif %} · direcionado em {{ p.data_entrega }}</span>
+        </div>
+        {% if p.status == 'em_compra' %}
+          <span class="selo laranja">Em compra</span>
+        {% else %}
+          <span class="selo cinza">Em separação</span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="cartao">
+    <h2>Solicitar troca ou reposição</h2>
+    <p class="campo-ajuda" style="margin-top:-4px">Precisa trocar um EPI danificado, vencido, ou repor um que acabou? Peça aqui — o SESMT aprova e o almoxarifado separa.</p>
+    <form method="post" action="{{ url_for('solicitacoes.nova') }}">
+      <div class="linha-campos">
+        <div>
+          <label for="epi_tamanho_id">EPI / Tamanho</label>
+          <select id="epi_tamanho_id" name="epi_tamanho_id" required>
+            <option value="">Selecione o equipamento e o tamanho</option>
+            {% for t in tamanhos_disponiveis %}
+              <option value="{{ t.id }}">{{ t.nome }} — Tam. {{ t.tamanho }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="tipo">Tipo</label>
+          <select id="tipo" name="tipo" required>
+            <option value="troca">Troca (o que já tenho está danificado/vencido)</option>
+            <option value="reposicao">Reposição (perdi ou preciso de mais um)</option>
+          </select>
+        </div>
+      </div>
+      <div class="linha-campos">
+        <div>
+          <label for="quantidade">Quantidade</label>
+          <input type="number" id="quantidade" name="quantidade" min="1" value="1" required>
+        </div>
+      </div>
+      <label for="motivo">Motivo</label>
+      <textarea id="motivo" name="motivo" placeholder="Ex.: rasgou a sola, perdi o capacete, etc."></textarea>
+      <button class="botao" type="submit">Enviar solicitação</button>
+    </form>
+  </div>
+
+  {% if minhas_solicitacoes %}
+  <div class="cartao">
+    <h2>Minhas solicitações</h2>
+    <div class="tabela-scroll">
+      <table>
+        <thead><tr><th>EPI</th><th>Tipo</th><th>Pedido em</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for s in minhas_solicitacoes %}
+            <tr>
+              <td>{{ s.epi_nome }} — tam. {{ s.tamanho }}</td>
+              <td>{{ 'Troca' if s.tipo == 'troca' else 'Reposição' }}</td>
+              <td>{{ s.criado_em[:10] }}</td>
+              <td>
+                {% if s.status == 'pendente_aprovacao' %}<span class="selo laranja">Aguardando SESMT</span>
+                {% elif s.status == 'aprovada' %}<span class="selo verde">Aprovada</span>
+                {% elif s.status == 'recusada' %}<span class="selo vermelho">Recusada</span>
+                {% else %}<span class="selo cinza">Cancelada</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
   {% endif %}
 
