@@ -3,7 +3,12 @@ Sincronização com a base oficial de Certificados de Aprovação (CA) do
 Ministério do Trabalho e Emprego (sistema CAEPI).
 
 Fonte oficial: ftp://ftp.mtps.gov.br/portal/fiscalizacao/seguranca-e-saude-no-trabalho/caepi/
-Arquivo: tgg_export_caepi.zip (contém um .txt/.csv delimitado por ';', encoding latin-1)
+Arquivo: tgg_export_caepi.zip — apesar do nome, o site já serviu esse link
+tanto como um zip de verdade quanto como o arquivo de dados puro, sem
+compactação nenhuma (um .txt delimitado por '|', com cabeçalho começando em
+"#NRRegistroCA...", encoding latin-1, quebra de linha \\r\\n). Por isso este
+módulo detecta o formato pela assinatura dos bytes baixados em vez de supor
+que é sempre um zip — ver _baixar_uma_tentativa() e sincronizar_base_ca().
 
 Este módulo baixa o arquivo, interpreta as colunas e grava tudo em uma tabela
 local (ca_cache) para que a busca por número de CA no cadastro de EPI seja
@@ -16,7 +21,8 @@ do arquivo baixado (rode `flask --app app inspecionar-ca <arquivo>` para ver
 as colunas encontradas).
 """
 import csv
-import io
+import os
+import tempfile
 import zipfile
 from datetime import datetime
 
@@ -32,7 +38,7 @@ URL_ZIP_FTP = "ftp://ftp.mtps.gov.br/portal/fiscalizacao/seguranca-e-saude-no-tr
 # publicada). O importador usa o primeiro nome da lista que encontrar no
 # cabeçalho, ignorando maiúsculas/acentos.
 COLUNAS_CANDIDATAS = {
-    "numero_ca": ["nrregistrocaepi", "nrca", "numeroca", "registrocaepi", "ca"],
+    "numero_ca": ["nrregistrocaepi", "nrregistroca", "nrca", "numeroca", "registrocaepi", "ca"],
     "situacao": ["dscsituacaoregistrocaepi", "situacao", "dscsituacao"],
     "validade": ["dtvalidade", "datavalidade", "dtvalidadecaepi"],
     "fabricante_cnpj": ["nrcnpj", "cnpj"],
@@ -63,73 +69,129 @@ def _mapear_colunas(colunas):
 # de erro/"acesso negado" (com HTTP 200!) quando o pedido não parece vir de um
 # navegador de verdade — o User-Agent padrão da lib requests ("python-requests/…")
 # costuma ser filtrado. Por isso simulamos um navegador comum aqui.
+#
+# O cabeçalho Accept abaixo imita o que um navegador de verdade manda ao abrir
+# esse link diretamente (não um pedido "eu quero especificamente um zip") —
+# um Accept forçando "application/zip, application/octet-stream" chegou a ser
+# usado aqui e é suspeito de ter feito o site (ou um WAF/CDN na frente dele)
+# devolver uma resposta diferente da que um navegador comum recebe, que veio
+# truncada/corrompida como zip. Testado manualmente: baixando esse mesmo link
+# num navegador comum, o arquivo chega como texto puro (sem compactação
+# nenhuma), então normalizamos o Accept para não sinalizar essa preferência.
 _HEADERS_NAVEGADOR = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept": "application/zip, application/octet-stream, */*",
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+        "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+    ),
     "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
 }
 
 
-def _baixar_uma_tentativa():
+def _baixar_uma_tentativa(destino):
     """Uma rodada tentando cada URL configurada (HTTPS, depois FTP).
-    Devolve os bytes do zip ou levanta o último erro encontrado."""
+
+    Baixa em streaming DIRETO PARA UM ARQUIVO EM DISCO (`destino`), em vez de
+    acumular a resposta inteira na memória — esse arquivo tem quase 100MB, e
+    testes locais mostraram que só carregá-lo como uma string Python (mesmo
+    sem usar pandas) já passava de 700MB de pico de memória, o que estouraria
+    os 512MB do plano gratuito do Render (o mesmo tipo de problema que já
+    tinha derrubado o processo antes, com pandas). Devolve o tipo detectado
+    ("zip" ou "dados") ou levanta o último erro encontrado.
+
+    Esse link já serviu tanto um zip de verdade quanto o arquivo de dados
+    puro (sem nenhuma compactação, apesar do nome "...zip" na URL) — por
+    isso NÃO exigimos mais que a resposta comece com a assinatura de zip
+    ("PK"). Quem decide se compacta ou não é o próprio site; aqui só
+    detectamos o que veio e tratamos cada caso.
+    """
     ultimo_erro = None
     for url in (URL_ZIP, URL_ZIP_FTP):
         try:
+            content_length_esperado = None
+            bytes_baixados = 0
             if url.startswith("ftp://"):
                 import ftplib
                 from urllib.parse import urlparse
                 u = urlparse(url)
-                buf = io.BytesIO()
                 with ftplib.FTP(u.hostname, timeout=20) as ftp:
                     ftp.login()
-                    ftp.retrbinary(f"RETR {u.path}", buf.write)
-                conteudo = buf.getvalue()
+                    with open(destino, "wb") as f:
+                        def _escrever(pedaco):
+                            nonlocal bytes_baixados
+                            f.write(pedaco)
+                            bytes_baixados += len(pedaco)
+                        ftp.retrbinary(f"RETR {u.path}", _escrever)
             else:
-                resp = requests.get(url, timeout=30, headers=_HEADERS_NAVEGADOR, allow_redirects=True)
-                resp.raise_for_status()
-                conteudo = resp.content
-                # Um zip de verdade começa com "PK". Se não começar, o site quase
-                # sempre devolveu uma página de bloqueio/erro em vez do arquivo —
-                # detectamos isso aqui para não mascarar o motivo real do erro.
-                if not conteudo[:2] == b"PK":
-                    tipo = resp.headers.get("Content-Type", "desconhecido")
-                    trecho = conteudo[:200].decode("utf-8", errors="replace").replace("\n", " ").strip()
-                    raise RuntimeError(
-                        f"O site devolveu HTTP {resp.status_code} mas o conteúdo não é um "
-                        f"arquivo zip (Content-Type: {tipo}). Início do conteúdo: {trecho!r}"
-                    )
-                content_length_esperado = resp.headers.get("Content-Length")
-            # O começo "PK" não garante um arquivo íntegro — uma resposta
-            # cortada no meio do download (comum em redes instáveis, ou uma
-            # técnica anti-bot que devolve um começo de arquivo válido mas
-            # corta o corpo) também pode começar com "PK" e mesmo assim não
-            # abrir como zip. Testamos isso aqui, antes de considerar a
-            # tentativa bem-sucedida — e, se falhar, registramos o tamanho
-            # baixado vs. o esperado para confirmar se foi truncamento.
-            try:
-                with zipfile.ZipFile(io.BytesIO(conteudo)):
-                    pass
-            except zipfile.BadZipFile as e:
-                detalhe = f"{len(conteudo)} bytes baixados"
-                if not url.startswith("ftp://") and content_length_esperado:
-                    detalhe += f" de {content_length_esperado} esperados (Content-Length)"
-                raise RuntimeError(
-                    f"Resposta começou com assinatura de zip válida, mas o arquivo não abriu "
-                    f"({e}) — provável download incompleto/truncado ({detalhe})."
+                resp = requests.get(
+                    url, timeout=90, headers=_HEADERS_NAVEGADOR,
+                    allow_redirects=True, stream=True,
                 )
-            return conteudo
+                resp.raise_for_status()
+                content_length_esperado = resp.headers.get("Content-Length")
+                with open(destino, "wb") as f:
+                    for pedaco in resp.iter_content(chunk_size=256 * 1024):
+                        if pedaco:
+                            f.write(pedaco)
+                            bytes_baixados += len(pedaco)
+
+            with open(destino, "rb") as f:
+                inicio_bytes = f.read(200)
+
+            if not url.startswith("ftp://"):
+                # Se o site bloquear/errar, o mais comum é devolver uma
+                # página HTML (de erro, captcha, etc.) em vez do arquivo —
+                # detectamos isso aqui para não mascarar o motivo real do
+                # problema com um erro confuso de parsing mais adiante.
+                inicio_normalizado = inicio_bytes.lstrip().lower()
+                parece_html = (
+                    inicio_normalizado.startswith(b"<!doctype") or inicio_normalizado.startswith(b"<html")
+                    or inicio_normalizado.startswith(b"<?xml") or inicio_normalizado.startswith(b"<head")
+                )
+                if parece_html:
+                    trecho = inicio_bytes.decode("utf-8", errors="replace").replace("\n", " ").strip()
+                    raise RuntimeError(
+                        f"O site devolveu HTTP {resp.status_code} mas o conteúdo parece ser uma "
+                        f"página HTML (de bloqueio, erro ou captcha), não o arquivo da base. "
+                        f"Início do conteúdo: {trecho!r}"
+                    )
+
+            # Um zip de verdade começa com "PK" — só faz sentido validar que
+            # abre como zip nesse caso. Se NÃO começar com "PK", tratamos o
+            # conteúdo como o próprio arquivo de dados, sem compactação (ver
+            # docstring do módulo).
+            if inicio_bytes[:2] == b"PK":
+                # O começo "PK" não garante um arquivo íntegro — uma resposta
+                # cortada no meio do download (comum em redes instáveis)
+                # também pode começar com "PK" e mesmo assim não abrir como
+                # zip. Testamos isso aqui, antes de considerar a tentativa
+                # bem-sucedida — e, se falhar, registramos o tamanho baixado
+                # vs. o esperado para confirmar se foi truncamento.
+                try:
+                    with zipfile.ZipFile(destino):
+                        pass
+                except zipfile.BadZipFile as e:
+                    detalhe = f"{bytes_baixados} bytes baixados"
+                    if content_length_esperado:
+                        detalhe += f" de {content_length_esperado} esperados (Content-Length)"
+                    raise RuntimeError(
+                        f"Resposta começou com assinatura de zip válida, mas o arquivo não abriu "
+                        f"({e}) — provável download incompleto/truncado ({detalhe})."
+                    )
+                return "zip"
+            return "dados"
         except Exception as e:  # noqa: BLE001
             ultimo_erro = e
             continue
     raise RuntimeError(f"Não foi possível baixar a base do CAEPI: {ultimo_erro}")
 
 
-def _baixar_zip_bytes():
-    """Baixa o zip oficial, tentando de novo algumas vezes.
+def _baixar_arquivo_base(destino):
+    """Baixa o arquivo oficial (zip ou dados puros) para `destino`, tentando
+    de novo algumas vezes. Devolve o tipo detectado ("zip" ou "dados").
 
     Na prática, o download desse arquivo às vezes falha de forma
     intermitente — a rede cai no meio, ou o site bloqueia uma tentativa e
@@ -142,7 +204,7 @@ def _baixar_zip_bytes():
     ultimo_erro = None
     for tentativa in range(3):
         try:
-            return _baixar_uma_tentativa()
+            return _baixar_uma_tentativa(destino)
         except Exception as e:  # noqa: BLE001
             ultimo_erro = e
             if tentativa < 2:
@@ -173,17 +235,46 @@ def _detectar_dialeto(amostra_bytes):
     if not indices_com_conteudo:
         raise RuntimeError("Arquivo da base CAEPI veio vazio ou sem linhas.")
 
+    # Nomes de coluna que já sabemos reconhecer (ver COLUNAS_CANDIDATAS) —
+    # usados abaixo para achar o cabeçalho por conteúdo, não só por contagem
+    # de separadores.
+    candidatos_conhecidos = {c for lista in COLUNAS_CANDIDATAS.values() for c in lista}
+
     for encoding in ("latin-1", "utf-8", "cp1252"):
         try:
             linhas = [linhas_originais[i].decode(encoding) for i in indices_com_conteudo]
         except UnicodeDecodeError:
             continue
+
+        # 1) Detecção "semântica": para cada linha da amostra (na ordem em
+        #    que aparecem no arquivo) e cada separador candidato, olhamos se
+        #    dividir a linha por esse separador produz colunas cujos nomes
+        #    batem com os que já conhecemos. Isso é bem mais confiável do
+        #    que só contar separadores: uma descrição de EPI em português
+        #    livre pode ter várias vírgulas, tabs ou até ponto-e-vírgula só
+        #    por coincidência de pontuação/formatação, o que já confundiu a
+        #    detecção puramente estatística usada antes (linhas de dados no
+        #    meio da amostra sendo escolhidas como se fossem o cabeçalho).
+        #    Testar linha por linha, na ordem, garante que a primeira linha
+        #    que realmente parecer um cabeçalho vença — normalmente a linha
+        #    0 mesmo.
+        for pos, indice_original in enumerate(indices_com_conteudo):
+            linha = linhas[pos]
+            for sep in (";", "\t", ",", "|"):
+                partes = linha.split(sep)
+                if len(partes) < 5:
+                    continue
+                normalizadas = {_normaliza(p) for p in partes}
+                if len(normalizadas & candidatos_conhecidos) >= 2:
+                    return encoding, sep, indice_original
+
+        # 2) Vazio: se nada bateu com um nome de coluna conhecido (layout
+        #    novo/desconhecido), caímos de volta na heurística estatística
+        #    antiga — a linha de cabeçalho de verdade tem várias colunas
+        #    (bastante separadores) e as linhas de dados logo depois
+        #    costumam ter a MESMA contagem.
         for sep in (";", "\t", ",", "|"):
             contagens = [linha.count(sep) for linha in linhas]
-            # A linha de cabeçalho de verdade tem várias colunas (bastante
-            # separadores) e as linhas de dados logo depois costumam ter a
-            # MESMA contagem — é assim que a identificamos em meio a
-            # possíveis linhas de título/metadado antes dela.
             for pos, indice_original in enumerate(indices_com_conteudo):
                 contagem = contagens[pos]
                 if contagem <= 2:
@@ -199,41 +290,64 @@ def _detectar_dialeto(amostra_bytes):
     )
 
 
-def _extrair_zip(zip_bytes):
-    """Descompacta o zip oficial e devolve (nome, bytes) do arquivo de dados.
+def _extrair_zip_para_arquivo(caminho_zip, destino):
+    """Descompacta o zip oficial para `destino` e devolve o nome do arquivo
+    extraído.
 
     O zip pode conter mais de um arquivo (por exemplo, um "leiame.txt"
     pequeno junto com o arquivo de dados de verdade) — por isso escolhemos o
     MAIOR arquivo do zip, e não simplesmente o primeiro da lista. Pegar só o
     primeiro foi, na prática, o que nos fez extrair um arquivo pequeno
     (não a base de dados) numa sincronização anterior.
+
+    Lê o zip direto do arquivo em disco (não de bytes em memória) e grava a
+    entrada escolhida em outro arquivo, em pedaços — evita carregar o
+    arquivo de dados inteiro (pode passar de 100MB depois de descompactado)
+    de uma vez na memória.
     """
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+    with zipfile.ZipFile(caminho_zip) as z:
         entradas = [info for info in z.infolist() if not info.is_dir() and info.file_size > 0]
         if not entradas:
             raise RuntimeError("Arquivo zip da base CAEPI veio vazio.")
         maior = max(entradas, key=lambda info: info.file_size)
-        with z.open(maior) as f:
-            return maior.filename, f.read()
+        with z.open(maior) as origem, open(destino, "wb") as saida:
+            for pedaco in iter(lambda: origem.read(256 * 1024), b""):
+                saida.write(pedaco)
+        return maior.filename
 
 
-def _ler_linhas_ca(conteudo_bytes, nome_arquivo="arquivo"):
-    """Gera um dict por linha do CSV oficial, sem carregar tudo em memória
-    de uma vez (csv.DictReader é um iterador — processa linha a linha)."""
-    amostra = b"\n".join(conteudo_bytes.split(b"\n")[:40])
+def _abrir_leitor_ca(caminho_arquivo, nome_arquivo="arquivo"):
+    """Abre o arquivo de dados (já baixado e, se preciso, descompactado) e
+    devolve (leitor, arquivo_aberto).
+
+    O leitor é um csv.DictReader que lê o arquivo DIRETO DO DISCO, linha a
+    linha, sem nunca carregar o conteúdo inteiro numa string Python de uma
+    vez só — o arquivo oficial tem quase 100MB e mais de 96 mil linhas;
+    carregá-lo inteiro (mesmo sem pandas) chegou a usar mais de 700MB de
+    memória em teste local, o que estouraria os 512MB do plano gratuito do
+    Render. Quem chama esta função é responsável por fechar `arquivo_aberto`
+    quando terminar de iterar o leitor.
+    """
+    with open(caminho_arquivo, "rb") as f:
+        amostra = f.read(256 * 1024)  # dá pra várias dezenas de linhas
     try:
         encoding, sep, indice_cabecalho = _detectar_dialeto(amostra)
     except RuntimeError as e:
-        raise RuntimeError(
-            f"{e} (arquivo extraído do zip: {nome_arquivo!r}, {len(conteudo_bytes)} bytes)"
-        )
-    texto_completo = conteudo_bytes.decode(encoding, errors="replace")
-    linhas = texto_completo.split("\n")
-    texto = "\n".join(linhas[indice_cabecalho:])
-    leitor = csv.DictReader(io.StringIO(texto), delimiter=sep)
+        tamanho = os.path.getsize(caminho_arquivo)
+        raise RuntimeError(f"{e} (arquivo: {nome_arquivo!r}, {tamanho} bytes)")
+
+    # newline="" é a forma recomendada pela documentação do módulo csv para
+    # abrir arquivos que serão lidos com csv.reader/DictReader — deixa o
+    # próprio módulo csv reconhecer corretamente as quebras de linha
+    # (inclusive \r\n) em vez de a gente cortar o arquivo manualmente.
+    arquivo = open(caminho_arquivo, "r", encoding=encoding, errors="replace", newline="")
+    for _ in range(indice_cabecalho):
+        arquivo.readline()
+    leitor = csv.DictReader(arquivo, delimiter=sep)
     if not leitor.fieldnames:
+        arquivo.close()
         raise RuntimeError("Não foi possível interpretar o formato do arquivo da base CAEPI.")
-    return leitor
+    return leitor, arquivo
 
 
 def _normalizar_data(texto):
@@ -281,70 +395,93 @@ def sincronizar_base_ca():
     milhares de linhas, e o plano gratuito do Render só tem 512MB de RAM.
     """
     try:
-        zip_bytes = _baixar_zip_bytes()
-        nome_arquivo, conteudo = _extrair_zip(zip_bytes)
-        leitor = _ler_linhas_ca(conteudo, nome_arquivo)
-        mapa = _mapear_colunas(leitor.fieldnames)
+        with tempfile.TemporaryDirectory(prefix="caepi-") as pasta_temp:
+            caminho_baixado = os.path.join(pasta_temp, "baixado")
+            tipo = _baixar_arquivo_base(caminho_baixado)
+            # O site já serviu esse link tanto compactado (zip) quanto como o
+            # arquivo de dados puro (sem compactação nenhuma) — só
+            # descompacta se o que veio realmente for um zip. Tudo em disco,
+            # nunca o conteúdo inteiro na memória de uma vez (ver docstrings
+            # acima).
+            if tipo == "zip":
+                caminho_dados = os.path.join(pasta_temp, "dados")
+                nome_arquivo = _extrair_zip_para_arquivo(caminho_baixado, caminho_dados)
+            else:
+                caminho_dados = caminho_baixado
+                nome_arquivo = "download direto (sem compactação)"
 
-        if "numero_ca" not in mapa:
-            raise RuntimeError(
-                "Não encontrei a coluna do número do CA no arquivo baixado. "
-                "O layout oficial pode ter mudado — ajuste COLUNAS_CANDIDATAS em app/ca_sync.py."
-            )
+            leitor, arquivo_aberto = _abrir_leitor_ca(caminho_dados, nome_arquivo)
+            try:
+                mapa = _mapear_colunas(leitor.fieldnames)
 
-        db = get_db()
-        colunas_sql = "(" + ", ".join(_COLUNAS_CA_CACHE) + ")"
-        agora = datetime.now().isoformat(timespec="seconds")
-        total = 0
-        # Dict só com as linhas do lote atual (no máximo _TAMANHO_LOTE de
-        # cada vez) — se o mesmo CA aparecer duas vezes dentro do MESMO lote,
-        # mantemos a última (o Postgres não permite que um único INSERT
-        # atualize a mesma linha duas vezes via ON CONFLICT). Repetições em
-        # lotes diferentes não têm problema: o lote mais recente simplesmente
-        # sobrescreve o valor gravado pelo lote anterior.
-        lote = {}
+                if "numero_ca" not in mapa:
+                    raise RuntimeError(
+                        "Não encontrei a coluna do número do CA no arquivo baixado. "
+                        "O layout oficial pode ter mudado — ajuste COLUNAS_CANDIDATAS em app/ca_sync.py."
+                    )
 
-        def _gravar_lote():
-            nonlocal total
-            if not lote:
-                return
-            valores = list(lote.values())
-            marcadores = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(valores))
-            args_lote = [valor for linha in valores for valor in linha]
-            db.execute(
-                f"INSERT INTO ca_cache {colunas_sql} VALUES {marcadores} {_UPSERT_CA_CACHE_SQL}",
-                args_lote,
-            )
-            # Confirma a cada lote em vez de só no final: se algo der errado
-            # no meio (timeout, queda de conexão), o que já foi processado
-            # não se perde e a próxima sincronização continua de onde parou.
-            db.commit()
-            total += len(valores)
-            lote.clear()
+                db = get_db()
+                colunas_sql = "(" + ", ".join(_COLUNAS_CA_CACHE) + ")"
+                agora = datetime.now().isoformat(timespec="seconds")
+                total = 0
+                # Dict só com as linhas do lote atual (no máximo
+                # _TAMANHO_LOTE de cada vez) — se o mesmo CA aparecer duas
+                # vezes dentro do MESMO lote, mantemos a última (o Postgres
+                # não permite que um único INSERT atualize a mesma linha
+                # duas vezes via ON CONFLICT). Repetições em lotes
+                # diferentes não têm problema: o lote mais recente
+                # simplesmente sobrescreve o valor gravado pelo lote
+                # anterior.
+                lote = {}
 
-        for row in leitor:
-            numero_ca = (row.get(mapa.get("numero_ca")) or "").strip()
-            if not numero_ca or numero_ca.lower() == "nan":
-                continue
-            lote[numero_ca] = (
-                numero_ca,
-                (row.get(mapa.get("situacao")) or "").strip(),
-                _normalizar_data(row.get(mapa.get("validade"))),
-                (row.get(mapa.get("fabricante_cnpj")) or "").strip(),
-                (row.get(mapa.get("fabricante_nome")) or "").strip(),
-                (row.get(mapa.get("equipamento_nome")) or "").strip(),
-                (row.get(mapa.get("descricao")) or "").strip(),
-                agora,
-            )
-            if len(lote) >= _TAMANHO_LOTE:
-                _gravar_lote()
-        _gravar_lote()  # o restante (lote incompleto no final do arquivo)
+                def _gravar_lote():
+                    nonlocal total
+                    if not lote:
+                        return
+                    valores = list(lote.values())
+                    marcadores = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(valores))
+                    args_lote = [valor for linha in valores for valor in linha]
+                    db.execute(
+                        f"INSERT INTO ca_cache {colunas_sql} VALUES {marcadores} {_UPSERT_CA_CACHE_SQL}",
+                        args_lote,
+                    )
+                    # Confirma a cada lote em vez de só no final: se algo
+                    # der errado no meio (timeout, queda de conexão), o que
+                    # já foi processado não se perde e a próxima
+                    # sincronização continua de onde parou.
+                    db.commit()
+                    total += len(valores)
+                    lote.clear()
 
-        db.execute(
-            "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
-            ("sucesso", total, f"{total} certificados importados/atualizados."),
-        )
-        db.commit()
+                for row in leitor:
+                    numero_ca = (row.get(mapa.get("numero_ca")) or "").strip()
+                    if not numero_ca or numero_ca.lower() == "nan":
+                        continue
+                    lote[numero_ca] = (
+                        numero_ca,
+                        (row.get(mapa.get("situacao")) or "").strip(),
+                        _normalizar_data(row.get(mapa.get("validade"))),
+                        (row.get(mapa.get("fabricante_cnpj")) or "").strip(),
+                        (row.get(mapa.get("fabricante_nome")) or "").strip(),
+                        (row.get(mapa.get("equipamento_nome")) or "").strip(),
+                        (row.get(mapa.get("descricao")) or "").strip(),
+                        agora,
+                    )
+                    if len(lote) >= _TAMANHO_LOTE:
+                        _gravar_lote()
+                _gravar_lote()  # o restante (lote incompleto no final do arquivo)
+
+                db.execute(
+                    "INSERT INTO sync_log (status, total_registros, mensagem) VALUES (?, ?, ?)",
+                    ("sucesso", total, f"{total} certificados importados/atualizados."),
+                )
+                db.commit()
+            finally:
+                # Fecha o arquivo aberto ANTES de sair do bloco `with` acima
+                # (que apaga a pasta temporária) — evita depender da coleta
+                # de lixo pra liberar o descritor de arquivo.
+                arquivo_aberto.close()
+
         return True, f"{total} certificados sincronizados com sucesso.", total
     except Exception as e:  # noqa: BLE001
         db = get_db()
