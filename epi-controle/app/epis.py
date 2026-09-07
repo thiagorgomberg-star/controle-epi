@@ -1,34 +1,31 @@
-import os
-import uuid
-from pathlib import Path
-
 from flask import (
-    Blueprint, current_app, flash, redirect, render_template, request, url_for
+    Blueprint, flash, redirect, render_template, request, url_for
 )
-from werkzeug.utils import secure_filename
 
 from .auth import roles_required, get_current_user
-from .db import query_db, execute_db, get_db
+from .db import query_db, execute_db, get_db, salvar_arquivo
 
 bp = Blueprint("epis", __name__, url_prefix="/epis")
 
 EXTENSOES_IMAGEM = {"png", "jpg", "jpeg", "webp"}
+_MIME_POR_EXTENSAO = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
 
 
 def _extensao_valida(nome_arquivo):
     return "." in nome_arquivo and nome_arquivo.rsplit(".", 1)[1].lower() in EXTENSOES_IMAGEM
 
 
-def _salvar_foto(arquivo, subpasta):
+def _salvar_foto(arquivo):
+    """Salva a foto enviada como um registro na tabela `arquivos` (banco de
+    dados) e retorna o id criado, em vez de gravar no disco — o disco do
+    Render free tier não é permanente."""
     if not arquivo or arquivo.filename == "":
         return None
     if not _extensao_valida(arquivo.filename):
         raise ValueError("Formato de imagem não suportado. Use PNG, JPG ou WEBP.")
     ext = arquivo.filename.rsplit(".", 1)[1].lower()
-    nome = f"{uuid.uuid4().hex}.{ext}"
-    destino = Path(current_app.config["UPLOAD_FOLDER"]) / subpasta / nome
-    arquivo.save(destino)
-    return f"{subpasta}/{nome}"
+    conteudo = arquivo.read()
+    return salvar_arquivo(conteudo, _MIME_POR_EXTENSAO[ext])
 
 
 @bp.route("/")
@@ -58,21 +55,21 @@ def novo():
         elif not ca_numero:
             erro = "Informe o número do CA."
 
-        foto_path = None
+        foto_arquivo_id = None
         if erro is None:
             try:
-                foto_path = _salvar_foto(request.files.get("foto"), "epis")
+                foto_arquivo_id = _salvar_foto(request.files.get("foto"))
             except ValueError as e:
                 erro = str(e)
 
         if erro is None:
             epi_id = execute_db(
                 """INSERT INTO epis (nome, descricao, fabricante, tamanho, ca_numero,
-                                      ca_validade, vida_util_dias, foto_path, estoque_atual,
+                                      ca_validade, vida_util_dias, foto_arquivo_id, estoque_atual,
                                       estoque_minimo, criado_por)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (nome, descricao, fabricante, tamanho, ca_numero, ca_validade,
-                 int(vida_util), foto_path, int(estoque_inicial), int(estoque_minimo),
+                 int(vida_util), foto_arquivo_id, int(estoque_inicial), int(estoque_minimo),
                  get_current_user()["id"]),
             )
             if int(estoque_inicial) > 0:
@@ -107,21 +104,21 @@ def editar(epi_id):
         vida_util = request.form.get("vida_util_dias", "180").strip() or "180"
         estoque_minimo = request.form.get("estoque_minimo", "0").strip() or "0"
 
-        foto_path = epi["foto_path"]
+        foto_arquivo_id = epi["foto_arquivo_id"]
         try:
-            nova_foto = _salvar_foto(request.files.get("foto"), "epis")
+            nova_foto = _salvar_foto(request.files.get("foto"))
             if nova_foto:
-                foto_path = nova_foto
+                foto_arquivo_id = nova_foto
         except ValueError as e:
             flash(str(e), "erro")
             return render_template("admin/epi_form.html", epi=epi)
 
         execute_db(
             """UPDATE epis SET nome=?, descricao=?, fabricante=?, tamanho=?, ca_numero=?,
-                                ca_validade=?, vida_util_dias=?, estoque_minimo=?, foto_path=?
+                                ca_validade=?, vida_util_dias=?, estoque_minimo=?, foto_arquivo_id=?
                WHERE id=?""",
             (nome, descricao, fabricante, tamanho, ca_numero, ca_validade,
-             int(vida_util), int(estoque_minimo), foto_path, epi_id),
+             int(vida_util), int(estoque_minimo), foto_arquivo_id, epi_id),
         )
         flash("EPI atualizado.", "sucesso")
         return redirect(url_for("epis.listar"))
