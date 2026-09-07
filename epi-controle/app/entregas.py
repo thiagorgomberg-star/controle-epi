@@ -10,6 +10,16 @@ from .db import get_db, query_db, execute_db, salvar_arquivo
 
 bp = Blueprint("entregas", __name__, url_prefix="/entregas")
 
+# Estados de preparação da entrega no almoxarifado, antes de o colaborador
+# poder retirar e assinar o aceite. "aceito" e "recusado" são estados finais,
+# fora deste fluxo (por isso não entram nesta lista).
+STATUS_PREPARACAO = ("em_separacao", "em_compra", "pronto_retirada")
+STATUS_ROTULOS = {
+    "em_separacao": "Em separação",
+    "em_compra": "Em compra",
+    "pronto_retirada": "Pronto p/ retirada",
+}
+
 
 @bp.route("/")
 @roles_required("admin", "almoxarife")
@@ -79,7 +89,7 @@ def nova():
         """INSERT INTO entregas (epi_id, epi_tamanho_id, colaborador_id, direcionado_por, quantidade, tamanho,
                                   motivo, data_entrega, data_troca_prevista, ca_numero,
                                   ca_validade, observacoes, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente')""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'em_separacao')""",
         (variante["epi_id"], epi_tamanho_id, colaborador_id, get_current_user()["id"], quantidade,
          variante["tamanho"], motivo, data_entrega, data_troca,
          variante["ca_numero"], variante["ca_validade"], observacoes),
@@ -92,7 +102,29 @@ def nova():
     )
     db.commit()
 
-    flash(f"EPI direcionado para {colaborador['nome']}. Ele(a) já pode dar o aceite no painel dele(a).", "sucesso")
+    flash(f"EPI direcionado para {colaborador['nome']}. Enviado para o almoxarifado separar.", "sucesso")
+    return redirect(url_for("entregas.listar"))
+
+
+@bp.route("/<int:entrega_id>/status", methods=["POST"])
+@roles_required("admin", "almoxarife")
+def atualizar_status(entrega_id):
+    """O almoxarife avança o status conforme faz a conferência/compra do
+    material, até marcar "pronto para retirada" — só a partir daí o
+    colaborador consegue ver a pendência e assinar o aceite."""
+    novo_status = request.form.get("novo_status", "")
+    entrega = query_db("SELECT * FROM entregas WHERE id = ?", (entrega_id,), one=True)
+
+    if entrega is None:
+        flash("Entrega não encontrada.", "erro")
+    elif entrega["status"] not in STATUS_PREPARACAO:
+        flash("Esta entrega já foi finalizada (aceita ou recusada) e não pode mais mudar de status.", "erro")
+    elif novo_status not in STATUS_PREPARACAO:
+        flash("Status inválido.", "erro")
+    else:
+        execute_db("UPDATE entregas SET status = ? WHERE id = ?", (novo_status, entrega_id))
+        flash(f"Status atualizado para \"{STATUS_ROTULOS[novo_status]}\".", "sucesso")
+
     return redirect(url_for("entregas.listar"))
 
 
@@ -119,6 +151,14 @@ def aceitar(entrega_id):
 
     if entrega["status"] == "aceito":
         flash("Este EPI já foi aceito anteriormente.", "info")
+        return redirect(url_for("painel.index_redirect"))
+
+    if entrega["status"] in ("em_separacao", "em_compra"):
+        flash(
+            "Este EPI ainda está em preparação no almoxarifado. "
+            "Você poderá assinar o aceite assim que estiver pronto para retirada.",
+            "info",
+        )
         return redirect(url_for("painel.index_redirect"))
 
     if request.method == "POST":
