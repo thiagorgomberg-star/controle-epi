@@ -32,7 +32,7 @@ def meus_epis():
         (user["id"],),
     )
     historico = query_db(
-        """SELECT en.*, e.nome AS epi_nome, e.foto_path AS epi_foto, a.aceito_em
+        """SELECT en.*, e.nome AS epi_nome, e.foto_arquivo_id AS epi_foto_arquivo_id, a.aceito_em
            FROM entregas en
            JOIN epis e ON e.id = en.epi_id
            LEFT JOIN aceites a ON a.entrega_id = en.id
