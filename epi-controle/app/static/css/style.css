@@ -46,6 +46,12 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.3px;
   font-size: 1.05rem;
   white-space: nowrap;
+  color: var(--branco);
+}
+.topbar .marca:hover {
+  color: var(--branco);
+  text-decoration: none;
+  opacity: 0.85;
 }
 
 .topbar nav {
@@ -287,6 +293,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 .logo-topo { height: 34px; width: auto; border-radius: 4px; }
+
 .modal-fundo {
   position: fixed;
   inset: 0;
