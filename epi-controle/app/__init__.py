@@ -5,6 +5,7 @@ from flask import Flask
 
 from . import db as db_module
 
+
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
 
@@ -31,6 +32,8 @@ def create_app(test_config=None):
     from . import estoque
     from . import entregas
     from . import solicitacoes
+    from . import ferramentas
+    from . import liberacoes
     from . import colaboradores
     from . import ca_sync
     from . import relatorios
@@ -43,6 +46,8 @@ def create_app(test_config=None):
     app.register_blueprint(estoque.bp)
     app.register_blueprint(entregas.bp)
     app.register_blueprint(solicitacoes.bp)
+    app.register_blueprint(ferramentas.bp)
+    app.register_blueprint(liberacoes.bp)
     app.register_blueprint(colaboradores.bp)
     app.register_blueprint(ca_sync.bp)
     app.register_blueprint(relatorios.bp)
