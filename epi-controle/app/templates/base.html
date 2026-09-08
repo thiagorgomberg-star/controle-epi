@@ -17,6 +17,8 @@
         <a href="{{ url_for('entregas.listar') }}" class="{{ 'ativo' if request.endpoint == 'entregas.listar' }}">Entregas</a>
         <a href="{{ url_for('epis.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('epis.') }}">EPIs</a>
         <a href="{{ url_for('estoque.listar') }}" class="{{ 'ativo' if request.endpoint == 'estoque.listar' }}">Estoque</a>
+        <a href="{{ url_for('ferramentas.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('ferramentas.') }}">Ferramentas</a>
+        <a href="{{ url_for('liberacoes.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('liberacoes.') }}">Liberações</a>
         {% if current_user.papel == 'admin' %}
           <a href="{{ url_for('solicitacoes.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('solicitacoes.') }}">Solicitações</a>
           <a href="{{ url_for('colaboradores.listar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('colaboradores.') }}">Colaboradores</a>
@@ -25,6 +27,7 @@
         {% endif %}
       {% else %}
         <a href="{{ url_for('painel.meus_epis') }}" class="{{ 'ativo' if request.endpoint == 'painel.meus_epis' }}">Meus EPIs</a>
+        <a href="{{ url_for('painel.minhas_ferramentas') }}" class="{{ 'ativo' if request.endpoint == 'painel.minhas_ferramentas' }}">Minhas Ferramentas</a>
       {% endif %}
     </nav>
     <div class="usuario">
