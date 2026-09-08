@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block titulo %}Minhas Ferramentas | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Minhas Ferramentas</h1>
+  <p class="subtitulo">Ferramentas e equipamentos liberados para você, emprestados ou fixos.</p>
+
+  <div class="grid-cards">
+    <div class="stat {{ 'alerta' if pendentes|length > 0 else '' }}">
+      <div class="numero">{{ pendentes|length }}</div>
+      <div class="rotulo">Aguardando seu aceite</div>
+    </div>
+    <div class="stat {{ 'perigo' if devolucoes_vencidas > 0 else '' }}">
+      <div class="numero">{{ devolucoes_vencidas }}</div>
+      <div class="rotulo">Devoluções vencidas</div>
+    </div>
+  </div>
+
+  {% if pendentes %}
+  <div class="destaque-caixa">
+    Você tem {{ pendentes|length }} ferramenta(s) pronta(s) para retirada no almoxarifado! Assine o aceite abaixo assim que for retirar.
+  </div>
+  <div class="cartao">
+    <h2>Aguardando seu aceite</h2>
+    {% for p in pendentes %}
+      <div class="epi-card">
+        <div class="info">
+          <strong>{{ p.ferramenta_nome }}</strong>
+          <span>Qtd. {{ p.quantidade }} · {{ 'Empréstimo' if p.tipo == 'emprestimo' else 'Fixa' }} · direcionada em {{ p.data_liberacao }}</span>
+        </div>
+        <a class="botao pequeno" href="{{ url_for('liberacoes.aceitar', liberacao_id=p.id) }}">Ver e assinar</a>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if em_andamento %}
+  <div class="cartao">
+    <h2>Em andamento no almoxarifado</h2>
+    <p class="campo-ajuda" style="margin-top:-4px">Ainda sendo separada ou comprada. Você será avisado aqui assim que estiver pronta para retirada.</p>
+    {% for p in em_andamento %}
+      <div class="epi-card">
+        <div class="info">
+          <strong>{{ p.ferramenta_nome }}</strong>
+          <span>Qtd. {{ p.quantidade }} · direcionada em {{ p.data_liberacao }}</span>
+        </div>
+        {% if p.status == 'em_compra' %}
+          <span class="selo laranja">Em compra</span>
+        {% else %}
+          <span class="selo cinza">Em separação</span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="cartao">
+    <h2>Comigo atualmente</h2>
+    {% if not comigo %}
+      <p class="vazio">Nenhuma ferramenta com você no momento.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>Ferramenta</th><th>Tipo</th><th>Recebida em</th><th>Devolução prevista</th></tr></thead>
+          <tbody>
+            {% for c in comigo %}
+              <tr>
+                <td>{{ c.ferramenta_nome }} ×{{ c.quantidade }}{% if c.patrimonio %} <span style="color:var(--cinza-600);font-size:0.8rem">(patr. {{ c.patrimonio }})</span>{% endif %}</td>
+                <td><span class="selo {{ 'azul' if c.tipo == 'emprestimo' else 'laranja' }}">{{ 'Empréstimo' if c.tipo == 'emprestimo' else 'Fixa' }}</span></td>
+                <td>{{ c.aceito_em[:10] if c.aceito_em else '—' }}</td>
+                <td>
+                  {% if c.tipo == 'emprestimo' %}
+                    {{ c.data_prevista_devolucao or '—' }}
+                    {% if c.data_prevista_devolucao and c.data_prevista_devolucao < hoje %}<span class="selo vermelho">vencida</span>{% endif %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="cartao">
+    <h2>Histórico</h2>
+    {% if not historico %}
+      <p class="vazio">Nenhuma ferramenta liberada até o momento.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>Ferramenta</th><th>Tipo</th><th>Liberação</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for h in historico %}
+              <tr>
+                <td>{{ h.ferramenta_nome }} ×{{ h.quantidade }}</td>
+                <td>{{ 'Empréstimo' if h.tipo == 'emprestimo' else 'Fixa' }}</td>
+                <td>{{ h.data_liberacao }}</td>
+                <td>
+                  {% if h.status == 'aceito' %}<span class="selo verde">Aceito {{ h.aceito_em[:10] if h.aceito_em else '' }}</span>
+                  {% elif h.status == 'devolvido' %}<span class="selo cinza">Devolvido {{ h.devolvido_em[:10] if h.devolvido_em else '' }}</span>
+                  {% elif h.status == 'recusado' %}<span class="selo vermelho">Recusado</span>
+                  {% else %}<span class="selo laranja">Pendente</span>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}
