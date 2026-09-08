@@ -28,6 +28,18 @@
       <div class="numero">{{ estoque_baixo }}</div>
       <div class="rotulo">Itens com estoque baixo</div>
     </div>
+    <div class="stat {{ 'alerta' if ferramental_pendentes > 0 else '' }}">
+      <div class="numero">{{ ferramental_pendentes }}</div>
+      <div class="rotulo">Ferramentas aguardando aceite</div>
+    </div>
+    <div class="stat {{ 'perigo' if ferramental_devolucao_vencida > 0 else '' }}">
+      <div class="numero">{{ ferramental_devolucao_vencida }}</div>
+      <div class="rotulo">Devoluções de ferramental vencidas</div>
+    </div>
+    <div class="stat {{ 'alerta' if ferramental_estoque_baixo > 0 else '' }}">
+      <div class="numero">{{ ferramental_estoque_baixo }}</div>
+      <div class="rotulo">Ferramentas com estoque baixo</div>
+    </div>
   </div>
 
   <div class="grid-2">
@@ -48,6 +60,14 @@
     <a class="cartao" href="{{ url_for('estoque.listar') }}" style="display:block">
       <h2>Estoque</h2>
       <p class="subtitulo" style="margin:0">Entradas, saídas e saldo por equipamento.</p>
+    </a>
+    <a class="cartao" href="{{ url_for('liberacoes.listar') }}" style="display:block">
+      <h2>Liberação de ferramental</h2>
+      <p class="subtitulo" style="margin:0">Libere ferramentas por empréstimo ou fixas para a equipe, e acompanhe devoluções.</p>
+    </a>
+    <a class="cartao" href="{{ url_for('ferramentas.listar') }}" style="display:block">
+      <h2>Cadastro de ferramentas</h2>
+      <p class="subtitulo" style="margin:0">Patrimônio, fabricante e saldo de estoque do ferramental.</p>
     </a>
     {% if current_user.papel == 'admin' %}
     <a class="cartao" href="{{ url_for('colaboradores.listar') }}" style="display:block">
