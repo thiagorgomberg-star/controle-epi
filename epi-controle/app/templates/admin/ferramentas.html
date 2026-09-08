@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block titulo %}Ferramentas cadastradas | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
+    <div>
+      <h1>Ferramentas cadastradas</h1>
+      <p class="subtitulo">Cadastro, patrimônio e saldo de estoque do ferramental.</p>
+    </div>
+    <a class="botao" href="{{ url_for('ferramentas.novo') }}">Nova ferramenta</a>
+  </div>
+
+  {% if not ferramentas %}
+    <div class="cartao"><p class="vazio">Nenhuma ferramenta cadastrada ainda.</p></div>
+  {% endif %}
+
+  {% for f in ferramentas %}
+    <div class="cartao" style="display:flex;gap:16px;align-items:center{{ ';opacity:0.55' if not f.ativo }}">
+      {% if f.foto_arquivo_id %}
+        <img src="{{ url_for('arquivo', arquivo_id=f.foto_arquivo_id) }}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px">
+      {% else %}
+        <div style="width:64px;height:64px;border-radius:8px;background:var(--cinza-100)"></div>
+      {% endif %}
+      <div style="flex:1">
+        <strong>{{ f.nome }}</strong>
+        {% if not f.ativo %}<span class="selo cinza">Removida</span>{% endif %}
+        <br>
+        <span style="color:var(--cinza-600);font-size:0.88rem">{{ f.fabricante or '—' }}{% if f.patrimonio %} · patrimônio {{ f.patrimonio }}{% endif %}</span><br>
+        <span style="font-size:0.85rem">
+          Estoque:
+          <span class="selo {{ 'vermelho' if f.estoque_atual <= f.estoque_minimo else 'verde' }}">{{ f.estoque_atual }} (mínimo {{ f.estoque_minimo }})</span>
+        </span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <a class="botao secundario pequeno" href="{{ url_for('ferramentas.editar', ferramenta_id=f.id) }}">Editar</a>
+        {% if current_user and current_user.papel == 'admin' %}
+          {% if f.ativo %}
+            <button class="botao secundario pequeno" type="submit" form="ferr-desativar-{{ f.id }}">Remover</button>
+          {% else %}
+            <button class="botao secundario pequeno" type="submit" form="ferr-reativar-{{ f.id }}">Reativar</button>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+
+  <div class="cartao">
+    <h2>Movimentar estoque</h2>
+    <form method="post" action="{{ url_for('ferramentas.movimentar') }}">
+      <div class="linha-campos">
+        <div>
+          <label for="ferramenta_id">Ferramenta</label>
+          <select id="ferramenta_id" name="ferramenta_id" required>
+            <option value="">Selecione a ferramenta</option>
+            {% for f in ferramentas if f.ativo %}
+              <option value="{{ f.id }}">{{ f.nome }} (saldo: {{ f.estoque_atual }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="tipo">Tipo do movimento</label>
+          <select id="tipo" name="tipo" required>
+            <option value="entrada">Entrada</option>
+            <option value="saida">Saída</option>
+            <option value="ajuste">Ajuste</option>
+          </select>
+        </div>
+      </div>
+      <div class="linha-campos">
+        <div>
+          <label for="quantidade">Quantidade</label>
+          <input type="number" id="quantidade" name="quantidade" min="1" required>
+        </div>
+        <div>
+          <label for="motivo">Motivo</label>
+          <input type="text" id="motivo" name="motivo" placeholder="ex.: compra, inventário, perda">
+        </div>
+      </div>
+      <button class="botao" type="submit">Lançar movimento</button>
+    </form>
+  </div>
+
+  <div class="cartao">
+    <h2>Últimas movimentações</h2>
+    {% if not movimentacoes %}
+      <p class="vazio">Nenhuma movimentação registrada.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>Data</th><th>Ferramenta</th><th>Tipo</th><th>Qtd.</th><th>Motivo</th><th>Usuário</th></tr></thead>
+          <tbody>
+            {% for m in movimentacoes %}
+              <tr>
+                <td>{{ m.criado_em[:16] }}</td>
+                <td>{{ m.ferramenta_nome }}</td>
+                <td>
+                  {% if m.tipo == 'entrada' %}<span class="selo verde">Entrada</span>
+                  {% elif m.tipo == 'saida' %}<span class="selo laranja">Saída</span>
+                  {% else %}<span class="selo cinza">Ajuste</span>{% endif %}
+                </td>
+                <td>{{ m.quantidade }}</td>
+                <td>{{ m.motivo or '—' }}</td>
+                <td>{{ m.usuario_nome or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+
+  {# Formulários de remover/reativar ficam FORA de qualquer outro form da
+     página (mesmo padrão usado em epis.html) — <form> dentro de <form> é
+     HTML inválido e quebra os botões de submit que vierem depois. #}
+  {% if current_user and current_user.papel == 'admin' %}
+    {% for f in ferramentas %}
+      {% if f.ativo %}
+        <form id="ferr-desativar-{{ f.id }}" method="post" hidden
+              action="{{ url_for('ferramentas.desativar', ferramenta_id=f.id) }}"
+              data-confirmar="Remover {{ f.nome }} da lista de ferramentas cadastradas? O histórico de estoque e liberações é mantido, mas o item deixa de aparecer aqui e no cadastro de novas liberações."></form>
+      {% else %}
+        <form id="ferr-reativar-{{ f.id }}" method="post" hidden
+              action="{{ url_for('ferramentas.reativar', ferramenta_id=f.id) }}"></form>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+</main>
+{% endblock %}
