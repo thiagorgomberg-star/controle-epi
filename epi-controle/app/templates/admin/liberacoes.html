@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block titulo %}Liberação de ferramental | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo">
+  <h1>Liberação de ferramental</h1>
+  <p class="subtitulo">Direcione uma ferramenta a um colaborador — como empréstimo (com devolução prevista) ou fixa para a equipe (sem devolução esperada).</p>
+
+  <div class="cartao">
+    <h2>Nova liberação</h2>
+    <form method="post" action="{{ url_for('liberacoes.nova') }}" id="form-nova-liberacao">
+      <div class="linha-campos">
+        <div>
+          <label for="colaborador_id">Colaborador</label>
+          <select id="colaborador_id" name="colaborador_id" required>
+            <option value="">Selecione o colaborador</option>
+            {% for c in colaboradores %}
+              <option value="{{ c.id }}">{{ c.nome }} — {{ c.matricula or 's/ matrícula' }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ferramenta_id">Ferramenta</label>
+          <select id="ferramenta_id" name="ferramenta_id" required>
+            <option value="">Selecione a ferramenta</option>
+            {% for f in ferramentas %}
+              <option value="{{ f.id }}">{{ f.nome }}{% if f.patrimonio %} — patrimônio {{ f.patrimonio }}{% endif %} (saldo: {{ f.estoque_atual }})</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="linha-campos">
+        <div>
+          <label for="quantidade">Quantidade</label>
+          <input type="number" id="quantidade" name="quantidade" min="1" value="1" required>
+        </div>
+        <div>
+          <label for="tipo">Tipo de liberação</label>
+          <select id="tipo" name="tipo" required>
+            <option value="emprestimo">Empréstimo (precisa devolver)</option>
+            <option value="fixo">Fixa para a equipe (sem devolução prevista)</option>
+          </select>
+        </div>
+      </div>
+      <div class="linha-campos">
+        <div>
+          <label for="data_liberacao">Data da liberação</label>
+          <input type="date" id="data_liberacao" name="data_liberacao" value="{{ hoje }}">
+        </div>
+        <div id="campo-devolucao-prevista">
+          <label for="data_prevista_devolucao">Previsão de devolução</label>
+          <input type="date" id="data_prevista_devolucao" name="data_prevista_devolucao">
+        </div>
+      </div>
+      <label for="motivo">Motivo</label>
+      <input type="text" id="motivo" name="motivo" placeholder="ex.: serviço em campo, obra X">
+      <label for="observacoes">Observações</label>
+      <textarea id="observacoes" name="observacoes"></textarea>
+      <button class="botao" type="submit">Registrar liberação</button>
+    </form>
+  </div>
+
+  <div class="cartao">
+    <h2>Histórico de liberações</h2>
+    <p class="campo-ajuda" style="margin-bottom:12px">Status do aceite, tipo (empréstimo/fixa) e devolução.</p>
+    {% if not liberacoes %}
+      <p class="vazio">Nenhuma liberação registrada ainda.</p>
+    {% else %}
+      <div class="tabela-scroll">
+        <table>
+          <thead><tr><th>Colaborador</th><th>Ferramenta</th><th>Tipo</th><th>Liberação</th><th>Devolução prevista</th><th>Status</th><th>Almoxarifado</th><th></th></tr></thead>
+          <tbody>
+            {% for l in liberacoes %}
+              <tr>
+                <td>{{ l.colaborador_nome }}<br><span style="color:var(--cinza-600);font-size:0.8rem">{{ l.colaborador_matricula or '' }}</span></td>
+                <td>{{ l.ferramenta_nome }} ×{{ l.quantidade }}</td>
+                <td><span class="selo {{ 'azul' if l.tipo == 'emprestimo' else 'laranja' }}">{{ 'Empréstimo' if l.tipo == 'emprestimo' else 'Fixa' }}</span></td>
+                <td>{{ l.data_liberacao }}</td>
+                <td>
+                  {{ l.data_prevista_devolucao or '—' }}
+                  {% if l.status == 'aceito' and l.tipo == 'emprestimo' and l.data_prevista_devolucao and l.data_prevista_devolucao < hoje %}
+                    <span class="selo vermelho">vencida</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if l.status == 'aceito' %}
+                    <span class="selo verde">Aceito</span>
+                  {% elif l.status == 'devolvido' %}
+                    <span class="selo cinza">Devolvido</span>
+                  {% elif l.status == 'recusado' %}
+                    <span class="selo vermelho">Recusado</span>
+                  {% elif l.status == 'pronto_retirada' %}
+                    <span class="selo azul">Pronto p/ retirada</span>
+                  {% elif l.status == 'em_compra' %}
+                    <span class="selo laranja">Em compra</span>
+                  {% else %}
+                    <span class="selo cinza">Em separação</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if l.status in ('em_separacao', 'em_compra', 'pronto_retirada') %}
+                    <form method="post" action="{{ url_for('liberacoes.atualizar_status', liberacao_id=l.id) }}" style="display:flex;gap:6px">
+                      <select name="novo_status" style="width:auto;padding:6px 8px">
+                        <option value="em_separacao" {{ 'selected' if l.status == 'em_separacao' }}>Em separação</option>
+                        <option value="em_compra" {{ 'selected' if l.status == 'em_compra' }}>Em compra</option>
+                        <option value="pronto_retirada" {{ 'selected' if l.status == 'pronto_retirada' }}>Pronto p/ retirada</option>
+                      </select>
+                      <button class="botao secundario pequeno" type="submit">Atualizar</button>
+                    </form>
+                  {% elif l.status == 'aceito' %}
+                    <form method="post" action="{{ url_for('liberacoes.devolver', liberacao_id=l.id) }}"
+                          data-confirmar="Registrar a devolução de {{ l.ferramenta_nome }} por {{ l.colaborador_nome }}? Isso repõe {{ l.quantidade }} unidade(s) no estoque.">
+                      <button class="botao secundario pequeno" type="submit">Devolver</button>
+                    </form>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Item "fixo" não tem devolução prevista — esconde o campo para não
+  // confundir quem estiver liberando (o back-end também zera esse campo
+  // nesse caso, então este script é só uma conveniência de UI).
+  const campoTipo = document.getElementById("tipo");
+  const campoDevolucao = document.getElementById("campo-devolucao-prevista");
+  function atualizarCampoDevolucao() {
+    campoDevolucao.style.display = campoTipo.value === "fixo" ? "none" : "";
+  }
+  campoTipo.addEventListener("change", atualizarCampoDevolucao);
+  atualizarCampoDevolucao();
+</script>
+{% endblock %}
