@@ -78,6 +78,53 @@ def meus_epis():
     )
 
 
+@bp.route("/painel/ferramentas")
+@login_required
+def minhas_ferramentas():
+    user = get_current_user()
+    hoje = datetime.now().strftime("%Y-%m-%d")
+
+    pendentes = query_db(
+        """SELECT l.*, f.nome AS ferramenta_nome FROM liberacoes_ferramenta l
+           JOIN ferramentas f ON f.id = l.ferramenta_id
+           WHERE l.colaborador_id = ? AND l.status = 'pronto_retirada'
+           ORDER BY l.id DESC""",
+        (user["id"],),
+    )
+    em_andamento = query_db(
+        """SELECT l.*, f.nome AS ferramenta_nome FROM liberacoes_ferramenta l
+           JOIN ferramentas f ON f.id = l.ferramenta_id
+           WHERE l.colaborador_id = ? AND l.status IN ('em_separacao', 'em_compra')
+           ORDER BY l.id DESC""",
+        (user["id"],),
+    )
+    comigo = query_db(
+        """SELECT l.*, f.nome AS ferramenta_nome, f.fabricante, f.patrimonio
+           FROM liberacoes_ferramenta l JOIN ferramentas f ON f.id = l.ferramenta_id
+           WHERE l.colaborador_id = ? AND l.status = 'aceito'
+           ORDER BY l.id DESC""",
+        (user["id"],),
+    )
+    historico = query_db(
+        """SELECT l.*, f.nome AS ferramenta_nome FROM liberacoes_ferramenta l
+           JOIN ferramentas f ON f.id = l.ferramenta_id
+           WHERE l.colaborador_id = ?
+           ORDER BY l.id DESC""",
+        (user["id"],),
+    )
+
+    devolucoes_vencidas = sum(
+        1 for c in comigo
+        if c["tipo"] == "emprestimo" and c["data_prevista_devolucao"] and c["data_prevista_devolucao"] < hoje
+    )
+
+    return render_template(
+        "colaborador/ferramentas.html",
+        pendentes=pendentes, em_andamento=em_andamento, comigo=comigo, historico=historico,
+        devolucoes_vencidas=devolucoes_vencidas, hoje=hoje,
+    )
+
+
 @bp.route("/admin")
 @roles_required("admin", "almoxarife")
 def admin_dashboard():
@@ -102,10 +149,26 @@ def admin_dashboard():
     solicitacoes_pendentes = query_db(
         "SELECT COUNT(*) AS c FROM solicitacoes WHERE status = 'pendente_aprovacao'", one=True
     )["c"]
+    ferramental_pendentes = query_db(
+        "SELECT COUNT(*) AS c FROM liberacoes_ferramenta WHERE status = 'pronto_retirada'", one=True
+    )["c"]
+    ferramental_devolucao_vencida = query_db(
+        """SELECT COUNT(*) AS c FROM liberacoes_ferramenta
+           WHERE status = 'aceito' AND tipo = 'emprestimo'
+             AND data_prevista_devolucao IS NOT NULL AND data_prevista_devolucao < ?""",
+        (hoje,), one=True,
+    )["c"]
+    ferramental_estoque_baixo = query_db(
+        "SELECT COUNT(*) AS c FROM ferramentas WHERE ativo=1 AND estoque_atual <= estoque_minimo",
+        one=True,
+    )["c"]
 
     return render_template(
         "admin/dashboard.html",
         aceites_pendentes=aceites_pendentes, epis_vencidos=epis_vencidos,
         ca_vencidos=ca_vencidos, estoque_baixo=estoque_baixo,
         solicitacoes_pendentes=solicitacoes_pendentes,
+        ferramental_pendentes=ferramental_pendentes,
+        ferramental_devolucao_vencida=ferramental_devolucao_vencida,
+        ferramental_estoque_baixo=ferramental_estoque_baixo,
     )
