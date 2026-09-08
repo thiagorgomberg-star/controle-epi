@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block titulo %}Aceite de Ferramenta | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo" style="max-width:560px">
+  <h1>Aceite de Ferramenta</h1>
+  <p class="subtitulo">Confira os dados, assine e tire uma foto para confirmar o recebimento.</p>
+
+  <div class="cartao">
+    <h2>{{ liberacao.ferramenta_nome }}</h2>
+    <p class="subtitulo" style="margin-bottom:12px">{{ liberacao.ferramenta_descricao or '' }}</p>
+    <table style="font-size:0.9rem">
+      <tr><td style="color:var(--cinza-600)">Fabricante</td><td>{{ liberacao.ferramenta_fabricante or '—' }}</td></tr>
+      <tr><td style="color:var(--cinza-600)">Patrimônio</td><td>{{ liberacao.ferramenta_patrimonio or '—' }}</td></tr>
+      <tr><td style="color:var(--cinza-600)">Quantidade</td><td>{{ liberacao.quantidade }}</td></tr>
+      <tr><td style="color:var(--cinza-600)">Tipo</td><td>{{ 'Empréstimo' if liberacao.tipo == 'emprestimo' else 'Fixa para a equipe' }}</td></tr>
+      <tr><td style="color:var(--cinza-600)">Motivo</td><td>{{ liberacao.motivo or '—' }}</td></tr>
+      <tr><td style="color:var(--cinza-600)">Data da liberação</td><td>{{ liberacao.data_liberacao }}</td></tr>
+      {% if liberacao.tipo == 'emprestimo' %}
+        <tr><td style="color:var(--cinza-600)">Previsão de devolução</td><td>{{ liberacao.data_prevista_devolucao or '—' }}</td></tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <div class="cartao">
+    <div class="destaque-caixa">
+      {% if liberacao.tipo == 'emprestimo' %}
+        Declaro ter recebido a ferramenta acima em perfeito estado, por empréstimo, e me comprometo a
+        usá-la corretamente, zelar por sua guarda e conservação, devolvê-la na data prevista (ou antes,
+        se solicitado pelo SESMT/almoxarifado) e comunicar qualquer dano.
+      {% else %}
+        Declaro ter recebido a ferramenta acima em perfeito estado, de forma fixa para uso da minha
+        função/equipe, e me comprometo a usá-la corretamente, zelar por sua guarda e conservação, e
+        comunicar qualquer dano.
+      {% endif %}
+    </div>
+
+    <form method="post" id="form-aceite">
+      <h3>Assinatura</h3>
+      <canvas id="canvas-assinatura" class="assinatura-caixa" width="500" height="180" style="width:100%;height:180px"></canvas>
+      <button type="button" id="btn-limpar-assinatura" class="botao secundario pequeno" style="margin-top:8px">Limpar assinatura</button>
+
+      <h3 style="margin-top:22px">Foto do colaborador</h3>
+      <p class="campo-ajuda" style="margin-bottom:8px">Tire uma foto do seu rosto agora — ela fica registrada como evidência do aceite.</p>
+      <div class="camera-caixa">
+        <video id="video-camera" autoplay playsinline hidden></video>
+        <canvas id="canvas-camera" hidden></canvas>
+        <img id="preview-camera" hidden alt="Foto do aceite">
+      </div>
+      <input type="file" id="input-foto-arquivo" accept="image/*" capture="user" hidden>
+      <div style="margin-top:10px">
+        <button type="button" id="btn-abrir-camera" class="botao secundario pequeno">Abrir câmera</button>
+        <button type="button" id="btn-tirar-foto" class="botao pequeno" hidden>Tirar foto</button>
+        <button type="button" id="btn-refazer-foto" class="botao secundario pequeno" hidden>Tirar outra</button>
+      </div>
+
+      <input type="hidden" name="assinatura_dados" id="campo-assinatura-dados">
+      <input type="hidden" name="foto_dados" id="campo-foto-dados">
+
+      <p id="mensagem-validacao" class="flash erro" hidden></p>
+
+      <button type="submit" class="botao" style="width:100%">Confirmar aceite</button>
+    </form>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/signature.js') }}"></script>
+<script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+<script>
+  const assinatura = iniciarAssinatura("canvas-assinatura", "btn-limpar-assinatura");
+  const camera = iniciarCamera({
+    videoId: "video-camera", canvasId: "canvas-camera", previewId: "preview-camera",
+    abrirBtnId: "btn-abrir-camera", tirarBtnId: "btn-tirar-foto", refazerBtnId: "btn-refazer-foto",
+    arquivoInputId: "input-foto-arquivo",
+  });
+
+  document.getElementById("form-aceite").addEventListener("submit", (evento) => {
+    const aviso = document.getElementById("mensagem-validacao");
+    if (assinatura.estaVazia()) {
+      evento.preventDefault();
+      aviso.textContent = "Assine no campo acima antes de confirmar.";
+      aviso.hidden = false;
+      return;
+    }
+    if (!camera.temFoto()) {
+      evento.preventDefault();
+      aviso.textContent = "Tire uma foto antes de confirmar.";
+      aviso.hidden = false;
+      return;
+    }
+    aviso.hidden = true;
+    document.getElementById("campo-assinatura-dados").value = assinatura.paraDataURL();
+    document.getElementById("campo-foto-dados").value = camera.paraDataURL();
+  });
+</script>
+{% endblock %}
