@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block titulo %}{{ 'Editar ferramenta' if ferramenta else 'Nova ferramenta' }} | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo" style="max-width:720px">
+  <h1>{{ 'Editar ferramenta' if ferramenta else 'Cadastrar ferramenta' }}</h1>
+  <p class="subtitulo">Dados do equipamento/ferramenta que poderá ser liberado a um colaborador, como empréstimo ou fixo.</p>
+
+  <div class="cartao">
+    <form method="post" enctype="multipart/form-data">
+      <label for="nome">Nome da ferramenta</label>
+      <input type="text" id="nome" name="nome" value="{{ ferramenta.nome if ferramenta else '' }}" required>
+
+      <label for="descricao">Descrição</label>
+      <textarea id="descricao" name="descricao">{{ ferramenta.descricao if ferramenta else '' }}</textarea>
+
+      <div class="linha-campos">
+        <div>
+          <label for="fabricante">Fabricante</label>
+          <input type="text" id="fabricante" name="fabricante" value="{{ ferramenta.fabricante if ferramenta else '' }}">
+        </div>
+        <div>
+          <label for="patrimonio">Patrimônio / nº de série</label>
+          <input type="text" id="patrimonio" name="patrimonio" value="{{ ferramenta.patrimonio if ferramenta else '' }}">
+        </div>
+      </div>
+
+      <div class="linha-campos">
+        {% if not ferramenta %}
+          <div>
+            <label for="estoque_inicial">Estoque inicial</label>
+            <input type="number" id="estoque_inicial" name="estoque_inicial" min="0" value="0">
+          </div>
+        {% else %}
+          <div>
+            <label>Estoque atual</label>
+            <p style="margin:0;padding:9px 0;font-weight:600">{{ ferramenta.estoque_atual }} <span class="campo-ajuda">(altere pela tela de Ferramentas → Movimentar estoque)</span></p>
+          </div>
+        {% endif %}
+        <div>
+          <label for="estoque_minimo">Estoque mínimo</label>
+          <input type="number" id="estoque_minimo" name="estoque_minimo" min="0" value="{{ ferramenta.estoque_minimo if ferramenta else 0 }}">
+        </div>
+      </div>
+
+      <label for="foto" style="margin-top:22px">Foto da ferramenta</label>
+      <input type="file" id="foto" name="foto" accept="image/*">
+      {% if ferramenta and ferramenta.foto_arquivo_id %}
+        <img src="{{ url_for('arquivo', arquivo_id=ferramenta.foto_arquivo_id) }}" alt="" style="width:80px;margin-top:8px;border-radius:8px">
+      {% endif %}
+
+      <div style="margin-top:16px">
+        <button class="botao" type="submit">Salvar ferramenta</button>
+        <a class="botao secundario" href="{{ url_for('ferramentas.listar') }}">Cancelar</a>
+      </div>
+    </form>
+  </div>
+</main>
+{% endblock %}
