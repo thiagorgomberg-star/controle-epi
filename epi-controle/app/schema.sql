@@ -189,3 +189,58 @@ CREATE TABLE IF NOT EXISTS solicitacoes (
 );
 CREATE INDEX IF NOT EXISTS idx_solicitacoes_colaborador ON solicitacoes(colaborador_id);
 CREATE INDEX IF NOT EXISTS idx_solicitacoes_status ON solicitacoes(status);
+
+-- Módulo de Ferramental: cadastro de ferramentas/equipamentos e liberação aos
+-- colaboradores, nas duas modalidades pedidas — "emprestimo" (precisa
+-- devolução, com previsão de data) e "fixo" (fica definitivamente com o
+-- colaborador/equipe, sem devolução esperada, mas ainda pode ser devolvida
+-- manualmente se a pessoa sair da empresa ou o item precisar voltar).
+CREATE TABLE IF NOT EXISTS ferramentas (
+    id SERIAL PRIMARY KEY,
+    nome TEXT NOT NULL,
+    descricao TEXT,
+    fabricante TEXT,
+    patrimonio TEXT,
+    foto_arquivo_id INTEGER REFERENCES arquivos(id),
+    estoque_atual INTEGER NOT NULL DEFAULT 0,
+    estoque_minimo INTEGER NOT NULL DEFAULT 0,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_ferramentas_ativo ON ferramentas(ativo);
+
+CREATE TABLE IF NOT EXISTS ferramenta_movimentacoes (
+    id SERIAL PRIMARY KEY,
+    ferramenta_id INTEGER NOT NULL REFERENCES ferramentas(id),
+    tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'saida', 'ajuste')),
+    quantidade INTEGER NOT NULL,
+    motivo TEXT,
+    usuario_id INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_ferramenta_mov_ferramenta ON ferramenta_movimentacoes(ferramenta_id);
+
+CREATE TABLE IF NOT EXISTS liberacoes_ferramenta (
+    id SERIAL PRIMARY KEY,
+    ferramenta_id INTEGER NOT NULL REFERENCES ferramentas(id),
+    colaborador_id INTEGER NOT NULL REFERENCES usuarios(id),
+    direcionado_por INTEGER NOT NULL REFERENCES usuarios(id),
+    quantidade INTEGER NOT NULL DEFAULT 1,
+    tipo TEXT NOT NULL CHECK (tipo IN ('emprestimo', 'fixo')),
+    motivo TEXT,
+    data_liberacao TEXT NOT NULL,
+    data_prevista_devolucao TEXT,
+    observacoes TEXT,
+    status TEXT NOT NULL DEFAULT 'em_separacao' CHECK (status IN ('em_separacao', 'em_compra', 'pronto_retirada', 'aceito', 'recusado', 'devolvido')),
+    assinatura_arquivo_id INTEGER REFERENCES arquivos(id),
+    foto_arquivo_id INTEGER REFERENCES arquivos(id),
+    aceito_em TEXT,
+    devolvido_em TEXT,
+    devolvido_para INTEGER REFERENCES usuarios(id),
+    observacoes_devolucao TEXT,
+    criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_liberacoes_ferramenta_colaborador ON liberacoes_ferramenta(colaborador_id);
+CREATE INDEX IF NOT EXISTS idx_liberacoes_ferramenta_status ON liberacoes_ferramenta(status);
+CREATE INDEX IF NOT EXISTS idx_liberacoes_ferramenta_ferramenta ON liberacoes_ferramenta(ferramenta_id);
