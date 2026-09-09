@@ -1,11 +1,33 @@
 from datetime import datetime, timedelta
 
-from flask import Blueprint, redirect, render_template, url_for
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from .auth import get_current_user, login_required, roles_required
-from .db import query_db
+from .db import execute_db, query_db, salvar_arquivo
 
 bp = Blueprint("painel", __name__)
+
+EXTENSOES_IMAGEM = {"png", "jpg", "jpeg", "webp"}
+_MIME_POR_EXTENSAO = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
+TIPOS_SANGUINEOS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+
+
+def _extensao_valida(nome_arquivo):
+    return "." in nome_arquivo and nome_arquivo.rsplit(".", 1)[1].lower() in EXTENSOES_IMAGEM
+
+
+def _salvar_foto_perfil(arquivo):
+    """Salva a foto de perfil enviada como um registro na tabela `arquivos`
+    (banco de dados) e retorna o id criado — mesmo padrão usado para fotos de
+    EPIs, ferramentas, assinaturas etc., já que o disco do Render free tier
+    não é permanente."""
+    if not arquivo or arquivo.filename == "":
+        return None
+    if not _extensao_valida(arquivo.filename):
+        raise ValueError("Formato de imagem não suportado. Use PNG, JPG ou WEBP.")
+    ext = arquivo.filename.rsplit(".", 1)[1].lower()
+    conteudo = arquivo.read()
+    return salvar_arquivo(conteudo, _MIME_POR_EXTENSAO[ext])
 
 
 @bp.route("/")
@@ -123,6 +145,50 @@ def minhas_ferramentas():
         pendentes=pendentes, em_andamento=em_andamento, comigo=comigo, historico=historico,
         devolucoes_vencidas=devolucoes_vencidas, hoje=hoje,
     )
+
+
+@bp.route("/painel/perfil", methods=["GET", "POST"])
+@login_required
+def perfil():
+    user = get_current_user()
+
+    if request.method == "POST":
+        cpf = request.form.get("cpf", "").strip()
+        rg = request.form.get("rg", "").strip()
+        tipo_sanguineo = request.form.get("tipo_sanguineo", "").strip().upper()
+        data_nascimento = request.form.get("data_nascimento", "").strip()
+        data_admissao = request.form.get("data_admissao", "").strip()
+        telefone = request.form.get("telefone", "").strip()
+
+        erro = None
+        if tipo_sanguineo and tipo_sanguineo not in TIPOS_SANGUINEOS:
+            erro = "Tipo sanguíneo inválido."
+
+        foto_perfil_arquivo_id = user["foto_perfil_arquivo_id"]
+        if erro is None:
+            try:
+                nova_foto = _salvar_foto_perfil(request.files.get("foto"))
+                if nova_foto:
+                    foto_perfil_arquivo_id = nova_foto
+            except ValueError as e:
+                erro = str(e)
+
+        if erro is not None:
+            flash(erro, "erro")
+            return redirect(url_for("painel.perfil"))
+
+        execute_db(
+            """UPDATE usuarios SET cpf=?, rg=?, tipo_sanguineo=?, data_nascimento=?,
+                                    data_admissao=?, telefone=?, foto_perfil_arquivo_id=?
+               WHERE id=?""",
+            (cpf, rg, tipo_sanguineo, data_nascimento, data_admissao, telefone,
+             foto_perfil_arquivo_id, user["id"]),
+        )
+        flash("Perfil atualizado com sucesso.", "sucesso")
+        return redirect(url_for("painel.perfil"))
+
+    usuario = query_db("SELECT * FROM usuarios WHERE id = ?", (user["id"],), one=True)
+    return render_template("colaborador/perfil.html", usuario=usuario, tipos_sanguineos=TIPOS_SANGUINEOS)
 
 
 @bp.route("/admin")
