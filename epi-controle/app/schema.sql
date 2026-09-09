@@ -24,6 +24,17 @@ CREATE TABLE IF NOT EXISTS usuarios (
     criado_em TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
 );
 
+-- Perfil complementar do colaborador: dados pessoais que o próprio
+-- colaborador preenche (não fazem parte do cadastro feito pelo admin). Serão
+-- usados futuramente para montar o crachá virtual — a foto do crachá fica em
+-- `arquivos`, junto com fotos/assinaturas, seguindo o mesmo padrão já usado
+-- no restante do sistema (nada é salvo em disco).
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rg TEXT;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tipo_sanguineo TEXT;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS data_nascimento TEXT;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS data_admissao TEXT;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_perfil_arquivo_id INTEGER REFERENCES arquivos(id);
+
 -- Base oficial de CA (Certificado de Aprovação) sincronizada do Ministério do Trabalho
 CREATE TABLE IF NOT EXISTS ca_cache (
     numero_ca TEXT PRIMARY KEY,
