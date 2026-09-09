@@ -25,9 +25,11 @@
           <a href="{{ url_for('ca_sync.status') }}" class="{{ 'ativo' if request.endpoint == 'ca_sync.status' }}">Base de CA</a>
           <a href="{{ url_for('configuracoes.editar') }}" class="{{ 'ativo' if request.endpoint and request.endpoint.startswith('configuracoes.') }}">Configuração</a>
         {% endif %}
+        <a href="{{ url_for('painel.perfil') }}" class="{{ 'ativo' if request.endpoint == 'painel.perfil' }}">Meu Perfil</a>
       {% else %}
         <a href="{{ url_for('painel.meus_epis') }}" class="{{ 'ativo' if request.endpoint == 'painel.meus_epis' }}">Meus EPIs</a>
         <a href="{{ url_for('painel.minhas_ferramentas') }}" class="{{ 'ativo' if request.endpoint == 'painel.minhas_ferramentas' }}">Minhas Ferramentas</a>
+        <a href="{{ url_for('painel.perfil') }}" class="{{ 'ativo' if request.endpoint == 'painel.perfil' }}">Meu Perfil</a>
       {% endif %}
     </nav>
     <div class="usuario">
