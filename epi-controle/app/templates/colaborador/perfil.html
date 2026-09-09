@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block titulo %}Meu Perfil | Controle de EPI{% endblock %}
+{% block conteudo %}
+<main class="conteudo" style="max-width:720px">
+  <h1>Meu Perfil</h1>
+  <p class="subtitulo">Preencha seus dados pessoais e envie uma foto — serão usados futuramente para montar seu crachá.</p>
+
+  <div class="cartao">
+    <h2>Dados cadastrais</h2>
+    <p class="campo-ajuda" style="margin-top:-4px">Estes dados são mantidos pelo SESMT. Se algo estiver errado, fale com o administrador.</p>
+    <div class="linha-campos">
+      <div>
+        <label>Nome</label>
+        <p style="margin:0;padding:9px 0;font-weight:600">{{ usuario.nome }}</p>
+      </div>
+      <div>
+        <label>Matrícula</label>
+        <p style="margin:0;padding:9px 0;font-weight:600">{{ usuario.matricula or '—' }}</p>
+      </div>
+    </div>
+    <div class="linha-campos">
+      <div>
+        <label>Cargo</label>
+        <p style="margin:0;padding:9px 0;font-weight:600">{{ usuario.cargo or '—' }}</p>
+      </div>
+      <div>
+        <label>Setor</label>
+        <p style="margin:0;padding:9px 0;font-weight:600">{{ usuario.setor or '—' }}</p>
+      </div>
+    </div>
+    <div class="linha-campos">
+      <div>
+        <label>E-mail</label>
+        <p style="margin:0;padding:9px 0;font-weight:600">{{ usuario.email }}</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Meus dados</h2>
+    <form method="post" enctype="multipart/form-data">
+      <div class="linha-campos">
+        <div>
+          <label for="telefone">Telefone</label>
+          <input type="text" id="telefone" name="telefone" value="{{ usuario.telefone or '' }}" placeholder="(00) 00000-0000">
+        </div>
+        <div>
+          <label for="tipo_sanguineo">Tipo sanguíneo</label>
+          <select id="tipo_sanguineo" name="tipo_sanguineo">
+            <option value="">Selecione</option>
+            {% for t in tipos_sanguineos %}
+              <option value="{{ t }}" {{ 'selected' if usuario.tipo_sanguineo == t }}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="linha-campos">
+        <div>
+          <label for="cpf">CPF</label>
+          <input type="text" id="cpf" name="cpf" value="{{ usuario.cpf or '' }}" placeholder="000.000.000-00">
+        </div>
+        <div>
+          <label for="rg">RG</label>
+          <input type="text" id="rg" name="rg" value="{{ usuario.rg or '' }}" placeholder="00.000.000-0">
+        </div>
+      </div>
+
+      <div class="linha-campos">
+        <div>
+          <label for="data_nascimento">Data de nascimento</label>
+          <input type="date" id="data_nascimento" name="data_nascimento" value="{{ usuario.data_nascimento or '' }}">
+        </div>
+        <div>
+          <label for="data_admissao">Data de admissão</label>
+          <input type="date" id="data_admissao" name="data_admissao" value="{{ usuario.data_admissao or '' }}">
+        </div>
+      </div>
+
+      <label for="foto" style="margin-top:22px">Foto (para o crachá)</label>
+      <input type="file" id="foto" name="foto" accept="image/*">
+      <p class="campo-ajuda">Use uma foto de rosto, bem iluminada, formato PNG, JPG ou WEBP.</p>
+      {% if usuario.foto_perfil_arquivo_id %}
+        <img src="{{ url_for('arquivo', arquivo_id=usuario.foto_perfil_arquivo_id) }}" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:8px;margin-top:4px">
+      {% endif %}
+
+      <div style="margin-top:16px">
+        <button class="botao" type="submit">Salvar meus dados</button>
+      </div>
+    </form>
+  </div>
+</main>
+{% endblock %}
